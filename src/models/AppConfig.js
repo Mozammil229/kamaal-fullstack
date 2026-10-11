@@ -1,0 +1,39 @@
+const mongoose = require('mongoose');
+
+const AppConfigSchema = new mongoose.Schema({
+    key: { type: String, default: 'global_config', unique: true },
+    maintenance: {
+        enabled: { type: Boolean, default: false },
+        message: { type: String, default: 'Kammal App is currently under system maintenance. Please try again soon.' },
+        upgradeTitle: { type: String, default: 'System Upgrade in Progress' },
+        countdownEnd: { type: Date, default: null },
+        allowAdmins: { type: Boolean, default: true }
+    },
+    minAppVersion: { type: String, default: '1.0.0' },
+    latestAppVersion: { type: String, default: '1.0.0' },
+    updateUrl: { type: String, default: '' },
+    updateNotes: { type: String, default: 'Performance improvements and bug fixes.' },
+    forceUpdate: { type: Boolean, default: false },
+    featureFlags: {
+        voiceAgent: { type: Boolean, default: true },
+        enhancer4k: { type: Boolean, default: true },
+        communityChat: { type: Boolean, default: true },
+        paymentUpload: { type: Boolean, default: true },
+        referralSystem: { type: Boolean, default: true },
+        geminiChat: { type: Boolean, default: true },
+        videoPatching: { type: Boolean, default: true }
+    },
+    whiteLabel: {
+        appName: { type: String, default: 'Kammal App' },
+        primaryColor: { type: String, default: '#38BDF8' },
+        logoUrl: { type: String, default: '' },
+        announcementBanner: { type: String, default: '' },
+        supportContact: { type: String, default: '' }
+    },
+    defaultSignupCredits: { type: Number, default: 2 },
+    systemPrompt: { type: String, default: 'You are Kammal AI, a world-class video optimization, MP4 atom manipulation, and social viral algorithm specialist.' },
+    currentModel: { type: String, default: 'gemini-2.5-flash' },
+    referralReward: { type: Number, default: 10 }
+});
+
+module.exports = mongoose.models.AppConfig || mongoose.model('AppConfig', AppConfigSchema);
