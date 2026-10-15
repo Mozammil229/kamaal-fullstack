@@ -34,7 +34,7 @@ let localConfig = {
     },
     defaultSignupCredits: 2,
     systemPrompt: 'You are Kammal AI, a world-class video optimization specialist.',
-    currentModel: 'gemini-2.5-flash',
+    currentModel: 'gemini-3.8-flash',
     referralReward: 10
 };
 

@@ -23,12 +23,14 @@ async function chat(req, res) {
         }
     }
 
-    const modelToUse = conf?.currentModel || 'gemini-2.5-flash';
+    const modelToUse = conf?.currentModel || 'gemini-3.8-flash';
     try {
         const reply = await generateWithKeyPool(message, effectivePrompt, modelToUse);
         return res.json({ success: true, reply, model: modelToUse });
     } catch (e) {
-        return res.status(500).json({ success: false, error: e.message });
+        // Never fabricate an AI reply on failure. Surface a clear, client-safe error.
+        const status = e.code === 'GEMINI_KEY_MISSING' ? 503 : 500;
+        return res.status(status).json({ success: false, error: e.message, code: e.code || 'GEMINI_ERROR' });
     }
 }
 
@@ -40,7 +42,7 @@ async function getSystemPrompt(req, res) {
         return res.json({
             success: true,
             systemPrompt: conf?.systemPrompt,
-            currentModel: conf?.currentModel || 'gemini-2.5-flash',
+            currentModel: conf?.currentModel || 'gemini-3.8-flash',
             featureFlags: conf?.featureFlags
         });
     } catch (e) {
