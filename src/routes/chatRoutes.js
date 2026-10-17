@@ -8,10 +8,10 @@ const { authenticateUser } = require('../middleware/auth');
 // so nobody can impersonate another user, read their DMs, or stuff ballots.
 router.get('/chat/messages', authenticateUser, chatController.getChatMessages);
 router.post('/chat/send', authenticateUser, chatController.sendChatMessage);
-router.post('/chat/react', chatController.reactChatMessage);
+router.post('/chat/react', authenticateUser, chatController.reactChatMessage);
 
-router.get('/support/messages', chatController.getSupportMessages);
-router.post('/support/send', chatController.sendSupportMessage);
+router.get('/support/messages', authenticateUser, chatController.getSupportMessages);
+router.post('/support/send', authenticateUser, chatController.sendSupportMessage);
 
 router.get('/polls/active', chatController.getActivePoll);
 router.post('/polls/vote', authenticateUser, chatController.votePoll);

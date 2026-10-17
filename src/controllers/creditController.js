@@ -198,6 +198,10 @@ async function redeemKey(req, res) {
 }
 
 // Submit Payment Proof
+// BH-6 FIX: granted credits come from a SERVER-SIDE plan table — the old
+// `Number(amount) >= 1000 ? 9999999 : 500` let the client mint 9,999,999
+// credits by sending amount=1000.
+const PLAN_CREDITS = { PRO: 500, VIP: 5000, LIFETIME: 9999999 };
 async function submitPaymentProof(req, res) {
     await connectToDatabase();
     const { method, transactionId, amount, requestedPlan, screenshotUrl } = req.body;
@@ -209,13 +213,24 @@ async function submitPaymentProof(req, res) {
     }
 
     try {
+        // BH-5 FIX: reject replayed transaction IDs (same TxID submitted twice).
+        const txid = String(transactionId).trim();
+        const dup = await PaymentProof.findOne({ transactionId: txid });
+        if (dup) {
+            return res.status(409).json({
+                success: false,
+                error: 'This transaction ID was already submitted.',
+                status: dup.status
+            });
+        }
+        const plan = String(requestedPlan || 'PRO').toUpperCase();
         const proof = await PaymentProof.create({
             username: target.trim(),
             method: method || 'jazzcash',
-            transactionId: String(transactionId).trim(),
+            transactionId: txid,
             amount: Number(amount) || 500,
-            requestedPlan: requestedPlan || 'PRO',
-            requestedCredits: Number(amount) >= 1000 ? 9999999 : 500,
+            requestedPlan: plan,
+            requestedCredits: PLAN_CREDITS[plan] || PLAN_CREDITS.PRO,
             screenshotUrl: screenshotUrl || '',
             status: 'pending'
         });

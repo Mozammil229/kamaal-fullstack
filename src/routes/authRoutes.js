@@ -29,3 +29,4 @@ router.post('/login', loginRateLimit, authController.login);
 router.get('/verify', authenticateUser, authController.verify);
 
 module.exports = router;
+module.exports.loginRateLimit = loginRateLimit;

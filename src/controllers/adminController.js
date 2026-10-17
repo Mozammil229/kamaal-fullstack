@@ -293,7 +293,13 @@ async function reviewPayment(req, res) {
 
         if (approve) {
             proof.status = 'approved';
-            const grantedCredits = Number(creditsToAdd) || proof.requestedCredits || 1000;
+            // BH-6 FIX: creditsToAdd is REQUIRED and explicit — the old
+            // fallback `|| proof.requestedCredits` granted client-influenced
+            // amounts when the admin omitted the field.
+            const grantedCredits = Number(creditsToAdd);
+            if (!Number.isFinite(grantedCredits) || grantedCredits <= 0) {
+                return res.status(400).json({ success: false, error: 'creditsToAdd (positive number) is required to approve.' });
+            }
             const grantedPlan = setPlan || proof.requestedPlan || 'PRO';
 
             const user = await User.findOne({ username: proof.username });

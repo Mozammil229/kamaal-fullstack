@@ -9,6 +9,8 @@ const aiRoutes = require('./routes/aiRoutes');
 const userRoutes = require('./routes/userRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const authController = require('./controllers/authController');
+const { authenticateUser } = require('./middleware/auth');
+const { loginRateLimit } = require('./routes/authRoutes');
 
 const app = express();
 
@@ -39,9 +41,12 @@ app.use('/api/admin', adminRoutes);
 // - /api/verify -> authController.verify
 // - /api/me -> authController.verify
 app.post('/api/register', authController.register);
-app.post('/api/login', authController.login);
-app.get('/api/verify', authController.verify);
-app.get('/api/me', authController.verify);
+// BH-2 FIX: the /api/login alias gets the same rate limiter as /api/auth/login.
+app.post('/api/login', loginRateLimit, authController.login);
+// BH-1 FIX: /api/verify + /api/me aliases now require auth; verify() uses the
+// JWT username only (no ?username= fallback).
+app.get('/api/verify', authenticateUser, authController.verify);
+app.get('/api/me', authenticateUser, authController.verify);
 
 // Root Fallback / Status
 app.get('/', (req, res) => {

@@ -88,10 +88,13 @@ async function sendChatMessage(req, res) {
     }
 }
 
-// React to Chat Message
+// React to Chat Message (BH-3 FIX: authenticated; username from JWT only —
+// the old body.username let anyone react-as / ballot-stuff any user.)
 async function reactChatMessage(req, res) {
     await connectToDatabase();
-    const { messageId, username, emoji } = req.body;
+    const { messageId, emoji } = req.body;
+    const username = req.user?.username;
+    if (!username) return res.status(401).json({ success: false, error: 'Authentication required.' });
     if (!messageId || !emoji) return res.status(400).json({ success: false, error: 'Message ID and emoji required.' });
 
     try {
@@ -112,10 +115,11 @@ async function reactChatMessage(req, res) {
     }
 }
 
-// Get Support Messages
+// Get Support Messages (BH-4 FIX: authenticated; scoped to the JWT user.
+// The old ?username= fallback let anyone read any user's support thread.)
 async function getSupportMessages(req, res) {
     await connectToDatabase();
-    const username = req.query.username || '';
+    const username = req.user?.username || '';
     const deviceId = req.query.deviceId || '';
 
     try {
@@ -141,15 +145,16 @@ async function getSupportMessages(req, res) {
     }
 }
 
-// Send Support Message
+// Send Support Message (BH-4 FIX: authenticated; sender from JWT only.)
 async function sendSupportMessage(req, res) {
     await connectToDatabase();
-    const { sender, deviceId, message } = req.body;
+    const { deviceId, message } = req.body;
+    const sender = req.user?.username || 'User';
     if (!message) return res.status(400).json({ success: false, error: 'Message required.' });
 
     try {
         const msg = await SupportMessage.create({
-            sender: sender || 'User',
+            sender: sender,
             deviceId: deviceId || '',
             message: String(message).trim(),
             isAdmin: false,

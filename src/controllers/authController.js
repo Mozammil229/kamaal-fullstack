@@ -233,12 +233,14 @@ async function login(req, res) {
     }
 }
 
-// Verify Controller (JWT-authenticated; username from verified token)
+// Verify Controller (JWT-authenticated; username from verified token ONLY.
+// BH-1 FIX: the ?username= / body.username fallback is removed — it let
+// anyone verify-as / enumerate any user without a token.)
 async function verify(req, res) {
     await connectToDatabase();
-    const username = req.user?.username || req.query.username || req.body?.username;
+    const username = req.user?.username;
     if (!username) {
-        return res.status(400).json({ success: false, error: 'Username is required.' });
+        return res.status(401).json({ success: false, error: 'Authentication required.' });
     }
 
     try {
