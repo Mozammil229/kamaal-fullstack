@@ -76,11 +76,18 @@ async function deductCredit(req, res) {
     }
 }
 
-// Authorize Pre-Patch Check
+// Authorize + Atomic Deduct (single server-side operation)
+// This endpoint BOTH authorizes and deducts exactly 1 credit atomically.
+// The client must never deduct on its own: only a 2xx {authorized:true}
+// response means a credit was consumed server-side. Offline / unverifiable
+// requests can therefore never yield a free patch.
 async function authorizePatch(req, res) {
     await connectToDatabase();
-    const { username } = req.body;
-    const target = username || req.user?.username;
+    if (!isDbConnected()) {
+        return res.status(503).json({ authorized: false, error: 'Database offline. Authorization requires authoritative database connection.' });
+    }
+    // Prefer the verified JWT identity (route uses authenticateUser); fall back to body username.
+    const target = req.user?.username || req.body.username;
     if (!target) return res.status(400).json({ authorized: false, error: 'Username required.' });
 
     try {
@@ -88,10 +95,34 @@ async function authorizePatch(req, res) {
         if (!user) return res.status(404).json({ authorized: false, error: 'User not found.' });
         if (user.status === 'banned') return res.status(403).json({ authorized: false, error: 'Account banned.' });
 
-        if (user.isPro || user.credits > 0) {
-            return res.json({ authorized: true, creditsRemaining: user.credits, isPro: user.isPro });
+        // Pro users: unlimited access, authorize without deducting.
+        if (user.isPro) {
+            user.stats.videosPatched += 1;
+            await user.save();
+            return res.json({ authorized: true, credits: user.credits, creditsRemaining: user.credits, isPro: true });
         }
-        return res.status(402).json({ authorized: false, error: 'No credits remaining.' });
+
+        // Atomic check-and-deduct: exactly 1 credit in a single ledger op.
+        // modifyCredits uses findOneAndUpdate with a credits >= 1 filter, so
+        // concurrent requests cannot overdraw; it throws 'Insufficient credits'
+        // when the balance is too low.
+        try {
+            const { user: updatedUser } = await modifyCredits({
+                username: target,
+                amount: -1,
+                type: 'usage_deduct',
+                description: 'Credit deducted for video_patch (authorize-patch)',
+                adminUser: 'System'
+            });
+            updatedUser.stats.videosPatched += 1;
+            await updatedUser.save();
+            return res.json({ authorized: true, credits: updatedUser.credits, creditsRemaining: updatedUser.credits, isPro: false });
+        } catch (e) {
+            if (e.message && e.message.includes('Insufficient credits')) {
+                return res.status(402).json({ authorized: false, error: 'No credits remaining. Please upgrade or redeem voucher.' });
+            }
+            throw e;
+        }
     } catch (e) {
         return res.status(500).json({ authorized: false, error: e.message });
     }
