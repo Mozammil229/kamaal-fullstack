@@ -6,11 +6,11 @@ const Transaction = require('../models/Transaction');
 const { modifyCredits } = require('../services/ledgerService');
 const { connectToDatabase, isDbConnected } = require('../config/db');
 
-// Get Credits
+// Get Credits (JWT-authenticated; username from verified token only)
 async function getCredits(req, res) {
     await connectToDatabase();
-    const username = req.query.username || req.user?.username;
-    if (!username) return res.status(400).json({ success: false, error: 'Username required.' });
+    const username = req.user?.username;
+    if (!username) return res.status(401).json({ success: false, error: 'Authentication required.' });
 
     try {
         const user = await User.findOne({ username });
@@ -36,11 +36,18 @@ async function deductCredit(req, res) {
         return res.status(503).json({ success: false, error: 'Database offline. Financial operations require authoritative database connection.' });
     }
 
-    const { username, amount, reason } = req.body;
-    const targetUser = username || req.user?.username;
-    if (!targetUser) return res.status(400).json({ success: false, error: 'Username required.' });
+    const { amount, reason } = req.body;
+    // SECURITY FIX: username comes from the verified JWT only — never from
+    // the body — so one user cannot deduct another user's credits.
+    const targetUser = req.user?.username;
+    if (!targetUser) return res.status(401).json({ success: false, error: 'Authentication required.' });
 
-    const decAmt = Number(amount) || 1;
+    // SECURITY FIX: amount must be a positive finite number. Previously
+    // amount=-100 was flipped to +100 credits via modifyCredits (free money).
+    const decAmt = Number(amount);
+    if (!Number.isFinite(decAmt) || decAmt <= 0) {
+        return res.status(400).json({ success: false, error: 'Amount must be a positive number.' });
+    }
 
     try {
         const user = await User.findOne({ username: targetUser });
@@ -86,9 +93,10 @@ async function authorizePatch(req, res) {
     if (!isDbConnected()) {
         return res.status(503).json({ authorized: false, error: 'Database offline. Authorization requires authoritative database connection.' });
     }
-    // Prefer the verified JWT identity (route uses authenticateUser); fall back to body username.
-    const target = req.user?.username || req.body.username;
-    if (!target) return res.status(400).json({ authorized: false, error: 'Username required.' });
+    // Username comes from the verified JWT (route uses authenticateUser) —
+    // never from the body — so an attacker cannot spend a victim's credits.
+    const target = req.user?.username;
+    if (!target) return res.status(401).json({ authorized: false, error: 'Authentication required.' });
 
     try {
         const user = await User.findOne({ username: target });
@@ -135,9 +143,11 @@ async function redeemKey(req, res) {
         return res.status(503).json({ success: false, error: 'Database offline. Voucher redemption requires authoritative database connection.' });
     }
 
-    const { username, key } = req.body;
-    const target = username || req.user?.username;
-    if (!target || !key) return res.status(400).json({ success: false, error: 'Username and Key required.' });
+    const { key } = req.body;
+    // SECURITY FIX: username from verified JWT only.
+    const target = req.user?.username;
+    if (!target) return res.status(401).json({ success: false, error: 'Authentication required.' });
+    if (!key) return res.status(400).json({ success: false, error: 'Username and Key required.' });
 
     const cleanKey = String(key).trim();
     try {
@@ -190,9 +200,11 @@ async function redeemKey(req, res) {
 // Submit Payment Proof
 async function submitPaymentProof(req, res) {
     await connectToDatabase();
-    const { username, method, transactionId, amount, requestedPlan, screenshotUrl } = req.body;
-    const target = username || req.user?.username;
-    if (!target || !transactionId) {
+    const { method, transactionId, amount, requestedPlan, screenshotUrl } = req.body;
+    // SECURITY FIX: username from verified JWT only.
+    const target = req.user?.username;
+    if (!target) return res.status(401).json({ success: false, error: 'Authentication required.' });
+    if (!transactionId) {
         return res.status(400).json({ success: false, error: 'Username and Transaction ID are required.' });
     }
 

@@ -14,7 +14,9 @@ async function getChatMessages(req, res) {
         let filter = {};
         if (channel.startsWith('@')) {
             const target = channel.slice(1);
-            const current = req.query.username || '';
+            // SECURITY FIX (#10): DM reader is the verified user — the old
+            // code took it from the query string, leaking anyone's DMs.
+            const current = req.user?.username || '';
             filter = {
                 $or: [
                     { sender: current, recipient: target },
@@ -48,21 +50,28 @@ async function getChatMessages(req, res) {
     }
 }
 
-// Send Chat Message
+// Send Chat Message (JWT-authenticated; sender is ALWAYS the verified user)
 async function sendChatMessage(req, res) {
     await connectToDatabase();
-    const { sender, recipient, text, channel } = req.body;
-    if (!sender || !text) return res.status(400).json({ success: false, error: 'Sender and text required.' });
+    // SECURITY FIX (#5): sender comes from the verified JWT only. The old code
+    // took `sender` from the body, so anyone could post as "owner"/"admin".
+    // Body `sender` is ignored entirely.
+    const username = req.user?.username;
+    if (!username) return res.status(401).json({ success: false, error: 'Authentication required.' });
+    const { recipient, text, channel } = req.body;
+    if (!text) return res.status(400).json({ success: false, error: 'Text required.' });
 
-    const cleanSender = String(sender).trim();
+    const cleanSender = String(username).trim();
     const cleanText = String(text).trim();
-    const isOwner = cleanSender.toLowerCase() === 'owner' || cleanSender.toLowerCase() === 'admin';
 
     try {
         const user = await User.findOne({ username: cleanSender });
         if (user && user.status === 'banned') {
             return res.status(403).json({ success: false, error: 'You are banned from sending messages.' });
         }
+        // Only real admins get the Owner badge — derived from the DB role,
+        // never from a client-supplied name.
+        const isOwner = user?.role === 'admin';
 
         const newMsg = await ChatMessage.create({
             channel: channel || 'global',
@@ -166,8 +175,12 @@ async function getActivePoll(req, res) {
 // Vote in Poll
 async function votePoll(req, res) {
     await connectToDatabase();
-    const { pollId, username, optionIndex } = req.body;
-    if (!pollId || username == null || optionIndex == null) {
+    // SECURITY FIX (#11): voter is the verified user, not a body field —
+    // otherwise anyone could stuff the ballot as someone else.
+    const username = req.user?.username;
+    const { pollId, optionIndex } = req.body;
+    if (!username) return res.status(401).json({ success: false, error: 'Authentication required.' });
+    if (!pollId || optionIndex == null) {
         return res.status(400).json({ success: false, error: 'Missing vote data.' });
     }
 

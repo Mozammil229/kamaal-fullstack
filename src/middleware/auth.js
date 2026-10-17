@@ -94,8 +94,10 @@ async function requireAdminAuth(req, res, next) {
         // Not a standard admin JWT, try direct credential match
     }
 
-    // 2. Direct exact credential match (backward compatibility with master keys if defined)
-    if (token === env.ADMIN_PASS || token === 'ADmin' || token === env.ADMIN_USER) {
+    // 2. Direct credential match against the configured admin secret only.
+    // SECURITY FIX: removed hardcoded fallback tokens ('ADmin', ADMIN_USER).
+    // Only env.ADMIN_PASS (a long random secret) or a valid admin JWT is accepted.
+    if (env.ADMIN_PASS && token === env.ADMIN_PASS) {
         req.adminUser = env.ADMIN_USER;
         req.adminRole = 'admin';
         return next();

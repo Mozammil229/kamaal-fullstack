@@ -5,7 +5,8 @@ const UserSchema = new mongoose.Schema({
     name: { type: String, default: '' },
     email: { type: String, default: '' },
     phone: { type: String, default: '' },
-    passwordHash: { type: String, required: true },
+    // SECURITY: never returned by default — must be explicitly selected.
+    passwordHash: { type: String, required: true, select: false },
     token: { type: String, default: '' },
     deviceId: { type: String, default: '', index: true },
     credits: { type: Number, default: 2 },
@@ -20,7 +21,8 @@ const UserSchema = new mongoose.Schema({
     referralCode: { type: String, default: '' },
     referredBy: { type: String, default: '' },
     customPrompt: { type: String, default: '' },
-    customGeminiKey: { type: String, default: '' },
+    // SECURITY: the user's private Gemini key — never returned by default.
+    customGeminiKey: { type: String, default: '', select: false },
     socialLinks: {
         tiktok: { type: String, default: '' },
         instagram: { type: String, default: '' },

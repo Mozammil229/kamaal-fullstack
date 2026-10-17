@@ -60,7 +60,8 @@ async function geminiKeyStatus(req, res) {
     await connectToDatabase();
     const username = req.user?.username;
     if (!username) return res.status(401).json({ success: false, error: 'Authentication required.' });
-    const user = await User.findOne({ username });
+    // NOTE: customGeminiKey is select:false — explicitly include it.
+    const user = await User.findOne({ username }).select('+customGeminiKey');
     const k = user?.customGeminiKey || '';
     return res.json({ success: true, hasKey: k.length > 10, last4: last4(k) });
 }

@@ -6,8 +6,67 @@ const User = require('../models/User');
 const AppConfig = require('../models/AppConfig');
 const { connectToDatabase } = require('../config/db');
 
+// SECURITY FIX (#7): bcrypt with per-password salts. The old unsalted SHA-256
+// is only used as a transparent-migration fallback inside verifyPassword.
 function hashPassword(password) {
+    return bcrypt.hashSync(String(password), 10);
+}
+
+function legacySha256(password) {
     return crypto.createHash('sha256').update(String(password)).digest('hex');
+}
+
+/**
+ * Verifies a password against the stored hash.
+ * Returns { ok, migrate }: migrate=true means the stored hash used a legacy
+ * scheme and should be re-hashed with bcrypt immediately (transparent
+ * migration — no user password reset needed).
+ */
+function verifyPassword(password, user) {
+    const pw = String(password);
+    const stored = user.passwordHash || '';
+    // 1) bcrypt (current scheme)
+    try {
+        if (stored.startsWith('$2')) {
+            return { ok: bcrypt.compareSync(pw, stored), migrate: false };
+        }
+    } catch (_) { /* fall through to legacy checks */ }
+    // 2) legacy unsalted SHA-256 → migrate
+    if (stored === legacySha256(pw)) return { ok: true, migrate: true };
+    // 3) ancient plaintext fallbacks (kept from original code) → migrate
+    if (user.password === pw || stored === pw) return { ok: true, migrate: true };
+    return { ok: false, migrate: false };
+}
+
+/**
+ * SECURITY FIX (#3): explicit allowlist for user objects sent to clients.
+ * NEVER includes passwordHash or customGeminiKey (also select:false in schema).
+ */
+function toSafeUser(u) {
+    if (!u) return null;
+    return {
+        id: u._id ? u._id.toString() : undefined,
+        username: u.username,
+        name: u.name,
+        email: u.email,
+        phone: u.phone,
+        deviceId: u.deviceId,
+        credits: u.credits,
+        isPro: u.isPro,
+        is_pro: u.isPro,
+        status: u.status,
+        tier: u.tier,
+        plan: u.proPlan,
+        proPlan: u.proPlan,
+        planExpiry: u.planExpiry,
+        role: u.role,
+        referralCode: u.referralCode,
+        customPrompt: u.customPrompt,
+        stats: u.stats,
+        token: u.token,
+        lastActiveAt: u.lastActiveAt,
+        createdAt: u.createdAt
+    };
 }
 
 function generateToken(username) {
@@ -91,7 +150,7 @@ async function register(req, res) {
             success: true,
             message: 'Registration approved.',
             token,
-            user: newUser
+            user: toSafeUser(newUser)
         });
     } catch (e) {
         return res.status(500).json({ success: false, error: e.message });
@@ -118,21 +177,27 @@ async function login(req, res) {
         return res.status(503).json({ success: false, error: 'Database offline. User login requires database connection.' });
     }
 
-    const pHash = hashPassword(password);
     const token = generateToken(identifier);
 
     try {
+        // NOTE: passwordHash is select:false — explicitly include it for verification.
         const user = await User.findOne({
             $or: [{ username: identifier }, { email: identifier }, { phone: identifier }]
-        });
+        }).select('+passwordHash');
 
+        // SECURITY FIX (#9): generic error for both cases — distinct messages
+        // ("User not found" vs "Invalid password") allow username enumeration.
         if (!user) {
-            return res.status(401).json({ success: false, error: 'Invalid credentials: User not found.' });
+            return res.status(401).json({ success: false, error: 'Invalid credentials.' });
         }
 
-        const isPassValid = (user.passwordHash === pHash) || (user.password === password) || (user.passwordHash === password);
-        if (!isPassValid) {
-            return res.status(401).json({ success: false, error: 'Invalid password. Access denied.' });
+        const { ok, migrate } = verifyPassword(password, user);
+        if (!ok) {
+            return res.status(401).json({ success: false, error: 'Invalid credentials.' });
+        }
+        // Transparent migration: a legacy hash worked → re-hash with bcrypt now.
+        if (migrate) {
+            user.passwordHash = hashPassword(password);
         }
 
         if (user.status === 'banned') {
@@ -161,17 +226,17 @@ async function login(req, res) {
             success: true,
             message: 'Login authorized.',
             token,
-            user
+            user: toSafeUser(user)
         });
     } catch (e) {
         return res.status(500).json({ success: false, error: e.message });
     }
 }
 
-// Verify Controller
+// Verify Controller (JWT-authenticated; username from verified token)
 async function verify(req, res) {
     await connectToDatabase();
-    const username = req.query.username || req.body?.username || req.user?.username;
+    const username = req.user?.username || req.query.username || req.body?.username;
     if (!username) {
         return res.status(400).json({ success: false, error: 'Username is required.' });
     }
@@ -183,7 +248,8 @@ async function verify(req, res) {
 
         user.lastActiveAt = new Date();
         await user.save();
-        return res.json({ success: true, user });
+        // SECURITY FIX (#3): allowlisted user object — no passwordHash/customGeminiKey.
+        return res.json({ success: true, user: toSafeUser(user) });
     } catch (e) {
         return res.status(500).json({ success: false, error: e.message });
     }
