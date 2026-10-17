@@ -7,7 +7,10 @@ module.exports = {
     MONGODB_URI: process.env.MONGODB_URI || '',
     JWT_SECRET: process.env.JWT_SECRET || 'kammal_secure_jwt_secret_change_in_production_2026',
     ADMIN_USER: (process.env.ADMIN_USER || 'admin').trim(),
-    ADMIN_PASS: (process.env.ADMIN_PASS || 'ADmin').trim(),
+    // SECURITY FIX (#1): NO hardcoded default password. If ADMIN_PASS is not
+    // set in the environment, direct-key admin auth is DISABLED (fail-closed).
+    // The old default 'ADmin' was a public backdoor.
+    ADMIN_PASS: (process.env.ADMIN_PASS || '').trim(),
     ADMIN_JWT_SECRET: process.env.ADMIN_JWT_SECRET || process.env.JWT_SECRET || 'kammal_admin_jwt_secret_2026',
     GEMINI_API_KEY: process.env.GEMINI_API_KEY || '',
     GEMINI_BACKUP_KEYS: process.env.GEMINI_BACKUP_KEYS || '',

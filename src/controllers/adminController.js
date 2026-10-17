@@ -106,6 +106,7 @@ async function getUsers(req, res) {
         const users = await User.find(query)
             .sort({ createdAt: -1 })
             .limit(Math.min(200, Number(limit) || 100))
+            .select('-token -__v')
             .lean();
 
         return res.json({ success: true, count: users.length, users });
