@@ -9,12 +9,14 @@ function last4(k) {
     return s.length >= 4 ? s.slice(-4) : '';
 }
 
-// POST /api/user/gemini-key  { username, key }
+// POST /api/user/gemini-key  { key }
+// Authenticated: username comes from the verified JWT (req.user), never the body.
 // Tests the key with a tiny "hello" (no pool fallback), then stores it on the user.
 async function saveGeminiKey(req, res) {
     await connectToDatabase();
-    const { username, key } = req.body || {};
-    if (!username) return res.status(400).json({ success: false, error: 'Username required.' });
+    const username = req.user?.username;
+    const { key } = req.body || {};
+    if (!username) return res.status(401).json({ success: false, error: 'Authentication required.' });
     const cleanKey = String(key || '').trim();
     if (cleanKey.length < 10) return res.status(400).json({ success: false, error: 'Key too short.' });
 
@@ -38,11 +40,12 @@ async function saveGeminiKey(req, res) {
     return res.json({ success: true, last4: last4(cleanKey) });
 }
 
-// DELETE /api/user/gemini-key?username=...
+// DELETE /api/user/gemini-key
+// Authenticated: username comes from the verified JWT (req.user).
 async function deleteGeminiKey(req, res) {
     await connectToDatabase();
-    const { username } = req.query || {};
-    if (!username) return res.status(400).json({ success: false, error: 'Username required.' });
+    const username = req.user?.username;
+    if (!username) return res.status(401).json({ success: false, error: 'Authentication required.' });
     const user = await User.findOne({ username });
     if (!user) return res.status(404).json({ success: false, error: 'User not found.' });
     user.customGeminiKey = '';
@@ -51,11 +54,12 @@ async function deleteGeminiKey(req, res) {
     return res.json({ success: true });
 }
 
-// GET /api/user/gemini-key/status?username=...
+// GET /api/user/gemini-key/status
+// Authenticated: username comes from the verified JWT (req.user).
 async function geminiKeyStatus(req, res) {
     await connectToDatabase();
-    const { username } = req.query || {};
-    if (!username) return res.status(400).json({ success: false, error: 'Username required.' });
+    const username = req.user?.username;
+    if (!username) return res.status(401).json({ success: false, error: 'Authentication required.' });
     const user = await User.findOne({ username });
     const k = user?.customGeminiKey || '';
     return res.json({ success: true, hasKey: k.length > 10, last4: last4(k) });
