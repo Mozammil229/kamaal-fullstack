@@ -6,6 +6,7 @@ const creditRoutes = require('./routes/creditRoutes');
 const configRoutes = require('./routes/configRoutes');
 const chatRoutes = require('./routes/chatRoutes');
 const aiRoutes = require('./routes/aiRoutes');
+const userRoutes = require('./routes/userRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const authController = require('./controllers/authController');
 
@@ -29,6 +30,7 @@ app.use('/api', creditRoutes);
 app.use('/api', configRoutes);
 app.use('/api', chatRoutes);
 app.use('/api', aiRoutes);
+app.use('/api', userRoutes);
 app.use('/api/admin', adminRoutes);
 
 // 2. Direct Aliases required by Android Retrofit specifications:

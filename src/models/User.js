@@ -20,6 +20,7 @@ const UserSchema = new mongoose.Schema({
     referralCode: { type: String, default: '' },
     referredBy: { type: String, default: '' },
     customPrompt: { type: String, default: '' },
+    customGeminiKey: { type: String, default: '' },
     socialLinks: {
         tiktok: { type: String, default: '' },
         instagram: { type: String, default: '' },

@@ -16,8 +16,8 @@ const GEMINI_KEYS = Array.from(new Set(
 let keyIndex = 0;
 const rateLimitedKeys = new Map();
 
-async function generateWithKeyPool(message, systemInstruction, modelName = 'gemini-3.8-flash') {
-    if (GEMINI_KEYS.length === 0) {
+async function generateWithKeys(keys, message, systemInstruction, modelName = 'gemini-3.8-flash') {
+    if (!keys || keys.length === 0) {
         const err = new Error('Gemini API key is not configured on the server. Set GEMINI_API_KEY in the server environment variables.');
         err.code = 'GEMINI_KEY_MISSING';
         throw err;
@@ -28,10 +28,10 @@ async function generateWithKeyPool(message, systemInstruction, modelName = 'gemi
     const modelsToTry = Array.from(new Set([modelName, 'gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-2.5-flash']));
     let lastError = null;
 
-    for (let k = 0; k < GEMINI_KEYS.length; k++) {
-        const candidateKey = GEMINI_KEYS[(keyIndex + k) % GEMINI_KEYS.length];
+    for (let k = 0; k < keys.length; k++) {
+        const candidateKey = keys[(keyIndex + k) % keys.length];
         const lastRateLimit = rateLimitedKeys.get(candidateKey) || 0;
-        if (Date.now() - lastRateLimit < 60000 && GEMINI_KEYS.length > 1) {
+        if (Date.now() - lastRateLimit < 60000 && keys.length > 1) {
             continue;
         }
 
@@ -45,7 +45,7 @@ async function generateWithKeyPool(message, systemInstruction, modelName = 'gemi
                 const result = await model.generateContent(message);
                 const reply = result.response.text();
                 if (reply && reply.trim()) {
-                    keyIndex = (keyIndex + k) % GEMINI_KEYS.length;
+                    keyIndex = (keyIndex + k) % keys.length;
                     return reply.trim();
                 }
             } catch (err) {
@@ -73,7 +73,32 @@ async function generateWithKeyPool(message, systemInstruction, modelName = 'gemi
     throw err;
 }
 
+async function generateWithKeyPool(message, systemInstruction, modelName) {
+    return generateWithKeys(GEMINI_KEYS, message, systemInstruction, modelName);
+}
+
+// BYOK: try the requesting user's own key first; fall back to the shared pool.
+async function generateWithUserKeyFirst(userKey, message, systemInstruction, modelName) {
+    const clean = String(userKey || '').trim();
+    if (clean.length > 10) {
+        try {
+            return await generateWithKeys([clean], message, systemInstruction, modelName);
+        } catch (e) {
+            console.warn('User Gemini key failed, falling back to shared pool.');
+        }
+    }
+    return generateWithKeyPool(message, systemInstruction, modelName);
+}
+
+// BYOK key test: tiny hello with ONLY the given key (no fallback). Throws if bad.
+async function testUserKey(userKey) {
+    const clean = String(userKey || '').trim();
+    return generateWithKeys([clean], 'Say hello in exactly 3 words.', 'You are a helpful assistant.', 'gemini-3.8-flash');
+}
+
 module.exports = {
     generateWithKeyPool,
+    generateWithUserKeyFirst,
+    testUserKey,
     hasConfiguredKeys: () => GEMINI_KEYS.length > 0
 };
