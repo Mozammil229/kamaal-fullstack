@@ -162,6 +162,10 @@
             <button onclick="switchTab('broadcastTab')" id="btnBroadcastTab" class="tab-btn px-4 py-2 rounded-xl text-xs font-bold transition text-gray-400 hover:text-white">
                 <i class="fa-solid fa-bullhorn mr-1.5"></i> Mobile Notifications
             </button>
+            <!-- PHASE C: admin messaging threads + broadcast (rendered by /js/admin-chats.js) -->
+            <button onclick="switchTab('chatsTab')" id="btnChatsTab" class="tab-btn px-4 py-2 rounded-xl text-xs font-bold transition text-gray-400 hover:text-white">
+                <i class="fa-solid fa-comments mr-1.5"></i> Chats
+            </button>
             <button onclick="switchTab('remoteTab')" id="btnRemoteTab" class="tab-btn px-4 py-2 rounded-xl text-xs font-bold transition text-gray-400 hover:text-white">
                 <i class="fa-solid fa-sliders mr-1.5"></i> App Control & Upgrade Time
             </button>
@@ -337,6 +341,16 @@
                         </button>
                     </form>
                 </div>
+            </div>
+        </div>
+
+        <!-- ============================================================== -->
+        <!-- PHASE C: CHATS -- 1-to-1 support threads + broadcast composer -->
+        <!-- (UI is rendered by /js/admin-chats.js into #adminChatsRoot)   -->
+        <!-- ============================================================== -->
+        <div id="chatsTab" class="hidden space-y-6">
+            <div id="adminChatsRoot">
+                <div class="text-center text-gray-500 py-8 text-sm">Loading Chats module...</div>
             </div>
         </div>
 
@@ -838,7 +852,7 @@
 
         // Tab Switching
         function switchTab(tabId) {
-            ['usersTab', 'broadcastTab', 'paymentsTab', 'keysTab', 'remoteTab'].forEach(id => {
+            ['usersTab', 'broadcastTab', 'chatsTab', 'paymentsTab', 'keysTab', 'remoteTab'].forEach(id => {
                 document.getElementById(id).classList.add('hidden');
             });
             document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -1577,5 +1591,7 @@
             }
         }
     </script>
+    <!-- PHASE C: admin Chats module (1-to-1 threads + broadcast composer) -->
+    <script src="/js/admin-chats.js"></script>
 </body>
 </html>

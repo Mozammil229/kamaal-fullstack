@@ -1,5 +1,6 @@
 const User = require('../models/User');
 const Transaction = require('../models/Transaction');
+const { computeSocialTag } = require('./socialTagService');
 
 /**
  * Concurrency-Safe Credit Modification with Persistent Ledger Logging
@@ -15,9 +16,12 @@ async function modifyCredits({ username, amount, type, description, adminUser, p
         filter.credits = { $gte: Math.abs(delta) };
     }
 
+    // PHASE E: positive deltas also grow lifetime-earned (drives TAG badges).
+    const inc = { credits: delta };
+    if (delta > 0) inc.creditsEarned = delta;
     const updatedUser = await User.findOneAndUpdate(
         filter,
-        { $inc: { credits: delta } },
+        { $inc: inc },
         { new: true }
     );
 
@@ -27,6 +31,16 @@ async function modifyCredits({ username, amount, type, description, adminUser, p
         if (!existing) throw new Error(`User '${username}' not found.`);
         throw new Error(`Insufficient credits. Current balance: ${existing.credits}`);
     }
+
+    // PHASE E: recompute the TAG badge from lifetime-earned (best effort,
+    // never fails the credit change).
+    try {
+        const freshTag = computeSocialTag(updatedUser.creditsEarned);
+        if (freshTag !== updatedUser.tag) {
+            await User.updateOne({ _id: updatedUser._id }, { $set: { tag: freshTag } });
+            updatedUser.tag = freshTag;
+        }
+    } catch (_) { /* tag recompute is non-critical */ }
 
     // Record immutable audit transaction
     const tx = await Transaction.create({

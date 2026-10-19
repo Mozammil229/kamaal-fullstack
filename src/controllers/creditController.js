@@ -4,6 +4,7 @@ const PaymentProof = require('../models/PaymentProof');
 const SupportMessage = require('../models/SupportMessage');
 const Transaction = require('../models/Transaction');
 const { modifyCredits } = require('../services/ledgerService');
+const { bumpEarnedAndRetag } = require('../services/socialTagService');
 const { connectToDatabase, isDbConnected } = require('../config/db');
 
 // Get Credits (JWT-authenticated; username from verified token only)
@@ -168,6 +169,8 @@ async function redeemKey(req, res) {
         if (!user) return res.status(404).json({ success: false, error: 'User not found.' });
 
         user.credits += voucher.credits;
+        // PHASE E: lifetime-earned grows the TAG badge.
+        bumpEarnedAndRetag(user, voucher.credits);
         user.isPro = voucher.isPro;
         user.proPlan = voucher.plan;
         user.tier = voucher.isPro ? 'VIP' : user.tier;

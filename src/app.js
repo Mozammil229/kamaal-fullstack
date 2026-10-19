@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
 
 const authRoutes = require('./routes/authRoutes');
 const creditRoutes = require('./routes/creditRoutes');
@@ -9,6 +10,14 @@ const aiRoutes = require('./routes/aiRoutes');
 const userRoutes = require('./routes/userRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const onlineToolRoutes = require('./routes/onlineToolRoutes');
+// PHASE C — Admin messaging (blueprint §6/§7).
+const messageRoutes = require('./routes/messageRoutes');
+const deviceRoutes = require('./routes/deviceRoutes');
+const referralRoutes = require('./routes/referralRoutes');
+// PHASE F — server-side patcher: POST /api/patch/request, POST /api/patch/apply.
+const patchRoutes = require('./routes/patchRoutes');
+// PHASE E — Social app: threads/messages/feed/stories/contacts (blueprint E1/E2/E3/E5).
+const socialRoutes = require('./routes/socialRoutes');
 const authController = require('./controllers/authController');
 const { authenticateUser } = require('./middleware/auth');
 const { loginRateLimit } = require('./routes/authRoutes');
@@ -36,6 +45,18 @@ app.use('/api', aiRoutes);
 app.use('/api', userRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api', onlineToolRoutes);
+// PHASE B — Kamal ID device identity (matches the /api/* convention).
+app.use('/api/device', deviceRoutes);
+// PHASE D — referrals: POST /api/referral/apply, GET /api/referral/my.
+app.use('/api/referral', referralRoutes);
+// PHASE F — server-side patch recipes (methods live on the server, not in the APK).
+app.use('/api/patch', patchRoutes);
+// PHASE E — social: /api/social/* + /api/user/fcm-token (auth-only, JWT identity).
+app.use('/api', socialRoutes);
+// PHASE E — serve uploaded social media (server-randomized filenames only).
+app.use('/uploads', express.static(path.join(__dirname, '..', 'public', 'uploads')));
+// PHASE C — Admin messaging (mounted at /api; routes carry their own paths).
+app.use('/api', messageRoutes);
 
 // 2. Direct Aliases required by Android Retrofit specifications:
 // - /api/register -> authController.register

@@ -24,6 +24,9 @@ function loginRateLimit(req, res, next) {
 
 router.post('/register', authController.register);
 router.post('/login', loginRateLimit, authController.login);
+// PHASE F — transport encryption: public RSA key for opportunistic
+// password encryption (public route; needed pre-login).
+router.get('/pubkey', authController.serverPubkey);
 // SECURITY FIX (#3): /verify requires auth and returns an allowlisted user
 // object (no passwordHash / customGeminiKey).
 router.get('/verify', authenticateUser, authController.verify);

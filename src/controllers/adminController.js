@@ -9,6 +9,7 @@ const ChatMessage = require('../models/ChatMessage');
 const SupportMessage = require('../models/SupportMessage');
 const AppConfig = require('../models/AppConfig');
 const { revokeToken } = require('../middleware/auth');
+const { bumpEarnedAndRetag } = require('../services/socialTagService');
 const { connectToDatabase, isDbConnected } = require('../config/db');
 
 // Admin Login
@@ -164,6 +165,8 @@ async function updateUser(req, res) {
         if (banReason !== undefined) user.banReason = banReason;
         if (customPrompt !== undefined) user.customPrompt = customPrompt;
         if (resetDevice === true) user.deviceId = '';
+        // PHASE E: only positive grants grow lifetime-earned (deducts/sets-down do not).
+        bumpEarnedAndRetag(user, creditsDelta > 0 ? creditsDelta : 0);
 
         await user.save();
 
@@ -305,6 +308,8 @@ async function reviewPayment(req, res) {
             const user = await User.findOne({ username: proof.username });
             if (user) {
                 user.credits += grantedCredits;
+                // PHASE E: lifetime-earned grows the TAG badge.
+                bumpEarnedAndRetag(user, grantedCredits);
                 user.isPro = true;
                 user.proPlan = grantedPlan;
                 user.tier = 'VIP';

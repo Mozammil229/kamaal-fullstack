@@ -1,6 +1,6 @@
 const AppConfig = require('../models/AppConfig');
 const User = require('../models/User');
-const { generateWithUserKeyFirst } = require('../services/geminiService');
+const { generateAIReply } = require('../services/aiProviderChain');
 const { connectToDatabase } = require('../config/db');
 
 // AI Chat Controller (/api/chat)
@@ -32,12 +32,17 @@ async function chat(req, res) {
 
     const modelToUse = conf?.currentModel || 'gemini-3.8-flash';
     try {
-        const reply = await generateWithUserKeyFirst(userGeminiKey, message, effectivePrompt, modelToUse);
+        // PHASE H: multi-provider free fallback chain — Groq -> Gemini pool
+        // (user's own key first, then shared pool) -> OpenRouter :free.
+        // Credit deduction per AI message is unchanged (client-side flow).
+        const reply = await generateAIReply(message, effectivePrompt, userGeminiKey, modelToUse);
+        // Contract unchanged: { success: true, reply, model } — the app's
+        // /api/ai/chat and /api/chat callers see no shape change.
         return res.json({ success: true, reply, model: modelToUse });
     } catch (e) {
         // Never fabricate an AI reply on failure. Surface a clear, client-safe error.
-        const status = e.code === 'GEMINI_KEY_MISSING' ? 503 : 500;
-        return res.status(status).json({ success: false, error: e.message, code: e.code || 'GEMINI_ERROR' });
+        const status = (e.code === 'GEMINI_KEY_MISSING' || e.code === 'AI_KEY_MISSING') ? 503 : 500;
+        return res.status(status).json({ success: false, error: e.message, code: e.code || 'AI_ERROR' });
     }
 }
 
