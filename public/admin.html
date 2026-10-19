@@ -542,6 +542,50 @@
                     </form>
                 </div>
 
+                <!-- 🛠 Online Tool — Gated In-App Page -->
+                <div class="glass-card p-6 rounded-2xl border-t-2 border-t-cyan-500 lg:col-span-2">
+                    <div class="flex items-center justify-between mb-3">
+                        <div>
+                            <h3 class="text-base font-black text-cyan-400">ONLINE TOOL — GATED PAGE CONTROL</h3>
+                            <p class="text-xs text-gray-400">Token-gated in-app WebView page. Bare links never work outside the app; credits are checked server-side at token issue.</p>
+                        </div>
+                        <i class="fa-solid fa-toolbox text-cyan-400 text-2xl"></i>
+                    </div>
+
+                    <form id="onlineToolForm" class="space-y-3">
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="text-[11px] text-gray-400 block mb-1">Page Enabled</label>
+                                <select id="otEnabled" class="w-full bg-gray-900 border border-gray-700 rounded-xl px-3 py-2 text-xs text-white">
+                                    <option value="true">Enabled</option>
+                                    <option value="false">Disabled</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="text-[11px] text-gray-400 block mb-1">Min Credits (user must exceed)</label>
+                                <input type="number" id="otMinCredits" value="12" min="0" class="w-full bg-gray-900 border border-gray-700 rounded-xl px-3 py-2 text-xs text-white">
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="text-[11px] text-gray-400 block mb-1">Page Theme</label>
+                                <select id="otTheme" class="w-full bg-gray-900 border border-gray-700 rounded-xl px-3 py-2 text-xs text-white">
+                                    <option value="neon-dark">Neon Dark</option>
+                                    <option value="light">Light</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="text-[11px] text-gray-400 block mb-1">Custom URL Path</label>
+                                <input type="text" id="otCustomPath" placeholder="online-tool" class="w-full bg-gray-900 border border-gray-700 rounded-xl px-3 py-2 text-xs text-white">
+                                <p class="text-[10px] text-gray-500 mt-1">Page opens at /&lt;path&gt;?token=… inside the app only.</p>
+                            </div>
+                        </div>
+                        <button type="submit" class="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-2.5 rounded-xl text-xs transition">
+                            SAVE ONLINE TOOL SETTINGS
+                        </button>
+                    </form>
+                </div>
+
             </div>
         </div>
 
@@ -1293,6 +1337,32 @@
             }
         });
 
+        // Online Tool Config Form
+        document.getElementById('onlineToolForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const enabled = document.getElementById('otEnabled').value === 'true';
+            const minCredits = document.getElementById('otMinCredits').value;
+            const theme = document.getElementById('otTheme').value;
+            const customPath = document.getElementById('otCustomPath').value.trim();
+
+            try {
+                const res = await fetch('/api/admin/config/update', {
+                    method: 'POST',
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify({ onlineTool: { enabled, minCredits, theme, customPath } })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    const p = (data.config && data.config.onlineTool && data.config.onlineTool.customPath) || customPath || 'online-tool';
+                    alert("Online Tool settings saved! Page path: /" + p);
+                } else {
+                    alert(data.error || 'Failed to save Online Tool settings');
+                }
+            } catch (err) {
+                alert(err.message);
+            }
+        });
+
         // Load Remote App Config
         async function loadRemoteConfig() {
             try {
@@ -1325,6 +1395,12 @@
                     }
                     if (data.whiteLabel && data.whiteLabel.supportContact) {
                         document.getElementById('supportContact').value = data.whiteLabel.supportContact;
+                    }
+                    if (data.onlineTool) {
+                        document.getElementById('otEnabled').value = data.onlineTool.enabled === false ? 'false' : 'true';
+                        if (data.onlineTool.minCredits !== undefined) document.getElementById('otMinCredits').value = data.onlineTool.minCredits;
+                        if (data.onlineTool.theme) document.getElementById('otTheme').value = data.onlineTool.theme;
+                        if (data.onlineTool.customPath) document.getElementById('otCustomPath').value = data.onlineTool.customPath;
                     }
                 }
 

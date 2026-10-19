@@ -8,6 +8,7 @@ const chatRoutes = require('./routes/chatRoutes');
 const aiRoutes = require('./routes/aiRoutes');
 const userRoutes = require('./routes/userRoutes');
 const adminRoutes = require('./routes/adminRoutes');
+const onlineToolRoutes = require('./routes/onlineToolRoutes');
 const authController = require('./controllers/authController');
 const { authenticateUser } = require('./middleware/auth');
 const { loginRateLimit } = require('./routes/authRoutes');
@@ -34,6 +35,7 @@ app.use('/api', chatRoutes);
 app.use('/api', aiRoutes);
 app.use('/api', userRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api', onlineToolRoutes);
 
 // 2. Direct Aliases required by Android Retrofit specifications:
 // - /api/register -> authController.register
@@ -57,6 +59,23 @@ app.get('/', (req, res) => {
         status: 'Online',
         timestamp: Date.now()
     });
+});
+
+// Online Tool gated page — path is admin-configurable (default /online-tool).
+// The ?token= query param IS the auth (5-min, single-use). Reads config per
+// request so an admin path change takes effect without a redeploy.
+app.get('*', async (req, res, next) => {
+    try {
+        const { getActiveConfig } = require('./controllers/configController');
+        const { getOnlineToolConfig, serveToolPage } = require('./controllers/onlineToolController');
+        const conf = await getActiveConfig();
+        const toolCfg = getOnlineToolConfig(conf);
+        const path = String(req.path || '').replace(/^\/+|\/+$/g, '').toLowerCase();
+        if (path === toolCfg.customPath) return serveToolPage(req, res);
+    } catch (e) {
+        console.warn('Online tool path check error:', e.message);
+    }
+    next();
 });
 
 // 404 Handler

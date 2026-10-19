@@ -33,6 +33,12 @@ let localConfig = {
         supportContact: ''
     },
     defaultSignupCredits: 2,
+    onlineTool: {
+        enabled: true,
+        minCredits: 12,
+        theme: 'neon-dark',
+        customPath: 'online-tool'
+    },
     systemPrompt: 'You are Kammal AI, a world-class video optimization specialist.',
     currentModel: 'gemini-3.8-flash',
     referralReward: 10
@@ -64,6 +70,7 @@ async function getAppConfig(req, res) {
             updateNotes: conf.updateNotes,
             featureFlags: conf.featureFlags,
             whiteLabel: conf.whiteLabel,
+            onlineTool: conf.onlineTool,
             serverTime: Date.now()
         });
     } catch (e) {

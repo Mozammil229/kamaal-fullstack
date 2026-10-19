@@ -406,7 +406,8 @@ async function updateConfig(req, res) {
         defaultSignupCredits,
         referralReward,
         systemPrompt,
-        currentModel
+        currentModel,
+        onlineTool
     } = req.body;
 
     try {
@@ -431,6 +432,25 @@ async function updateConfig(req, res) {
         if (referralReward !== undefined) conf.referralReward = Number(referralReward);
         if (systemPrompt !== undefined) conf.systemPrompt = systemPrompt;
         if (currentModel !== undefined) conf.currentModel = currentModel;
+        if (onlineTool !== undefined && onlineTool !== null && typeof onlineTool === 'object') {
+            const prev = (conf.onlineTool && typeof conf.onlineTool.toObject === 'function')
+                ? conf.onlineTool.toObject() : (conf.onlineTool || {});
+            const next = { ...prev };
+            if (onlineTool.enabled !== undefined) next.enabled = Boolean(onlineTool.enabled);
+            if (onlineTool.minCredits !== undefined) {
+                const mc = Number(onlineTool.minCredits);
+                if (Number.isFinite(mc) && mc >= 0) next.minCredits = mc;
+            }
+            if (onlineTool.theme !== undefined) {
+                next.theme = onlineTool.theme === 'light' ? 'light' : 'neon-dark';
+            }
+            if (onlineTool.customPath !== undefined) {
+                let p = String(onlineTool.customPath).trim().toLowerCase()
+                    .replace(/[^a-z0-9-]/g, '').replace(/^-+|-+$/g, '');
+                if (p && p !== 'api' && p !== 'admin') next.customPath = p;
+            }
+            conf.onlineTool = next;
+        }
 
         await conf.save();
         return res.json({ success: true, message: 'System Governance & Upgrade Configuration saved successfully.', config: conf });

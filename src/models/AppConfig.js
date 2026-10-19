@@ -31,6 +31,12 @@ const AppConfigSchema = new mongoose.Schema({
         supportContact: { type: String, default: '' }
     },
     defaultSignupCredits: { type: Number, default: 2 },
+    onlineTool: {
+        enabled: { type: Boolean, default: true },
+        minCredits: { type: Number, default: 12 },
+        theme: { type: String, default: 'neon-dark' },
+        customPath: { type: String, default: 'online-tool' }
+    },
     systemPrompt: { type: String, default: 'You are Kammal AI, a world-class video optimization, MP4 atom manipulation, and social viral algorithm specialist.' },
     currentModel: { type: String, default: 'gemini-3.8-flash' },
     referralReward: { type: Number, default: 10 }
