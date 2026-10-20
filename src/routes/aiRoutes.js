@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const aiController = require('../controllers/aiController');
+const extractController = require('../controllers/extractController');
 const { authenticateUser } = require('../middleware/auth');
 
 // SECURITY FIX (#6) + PHASE H: AI chat burns free-tier quota on the owner's
@@ -33,5 +34,28 @@ router.get('/ai/system-prompt', aiController.getSystemPrompt);
 // elapsed-time report for the FREE tier's 20 min/day ONLINE AI pool.
 router.get('/ai/usage', authenticateUser, aiController.getUsage);
 router.post('/ai/usage/report', authenticateUser, aiController.reportUsage);
+
+// ALL-IN-ONE DOWNLOADER (2026-10-20): one link in -> normalized format list
+// out. Providers are called server-side only; per-user throttle matches the
+// AI chat limit (20/min) so the shared free provider quota cannot be burned
+// by one client.
+const extractBuckets = new Map();
+function extractRateLimit(req, res, next) {
+    const key = req.user?.username || req.ip || 'unknown';
+    const now = Date.now();
+    const windowMs = 60 * 1000;
+    const max = 20;
+    let entry = extractBuckets.get(key);
+    if (!entry || now - entry.start > windowMs) entry = { start: now, count: 0 };
+    entry.count += 1;
+    extractBuckets.set(key, entry);
+    if (extractBuckets.size > 5000) extractBuckets.clear();
+    if (entry.count > max) {
+        return res.status(429).json({ success: false, error: 'Rate limit exceeded. Please slow down.' });
+    }
+    next();
+}
+router.post('/extract', authenticateUser, extractRateLimit, extractController.extract);
+router.post('/extract/resolve', authenticateUser, extractRateLimit, extractController.resolve);
 
 module.exports = router;
