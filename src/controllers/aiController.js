@@ -2,7 +2,21 @@ const AppConfig = require('../models/AppConfig');
 const User = require('../models/User');
 const { generateAIReply } = require('../services/aiProviderChain');
 const aiUsage = require('../services/aiUsageService');
+const personaPrompts = require('../personas/personaPrompts');
+const memoryService = require('../services/memoryService');
+const memoryCrypto = require('../services/memoryCrypto');
 const { connectToDatabase } = require('../config/db');
+
+// PRO PERSONAS (user order 2026-10-20): the prompts live ONLY on the
+// server (src/personas/personaPrompts.js, verbatim user-supplied texts).
+// The app sends just the persona id; the client-side systemInstruction
+// is ignored for these ids exactly like it is for every other request.
+// 'normal' / 'evil' / anything else keeps today's behavior untouched.
+const PRO_PERSONAS = {
+    darkmind: personaPrompts.darkmind,
+    mentalist: personaPrompts.mentalist,
+    satirist: personaPrompts.satirist,
+};
 
 // AI Chat Controller (/api/chat)
 async function chat(req, res) {
@@ -33,6 +47,33 @@ async function chat(req, res) {
         }
     }
 
+    // PRO PERSONA GATE (2026-10-20): darkmind / mentalist / satirist are
+    // PRO-only. Non-PRO -> 403 PRO_REQUIRED, no reply is generated.
+    const personaId = String(req.body?.persona || '').trim().toLowerCase();
+    const isProUser = !!(dbUser && aiUsage.isUnlimited(dbUser));
+    if (Object.prototype.hasOwnProperty.call(PRO_PERSONAS, personaId)) {
+        if (!isProUser) {
+            return res.status(403).json({ success: false, code: 'PRO_REQUIRED', error: 'Ye PRO feature hai.' });
+        }
+        effectivePrompt = PRO_PERSONAS[personaId];
+    }
+
+    // AI MEMORY INJECTION (2026-10-20): PRO users with memory enabled get
+    // their decrypted long-term facts appended to the system instruction
+    // (works with ANY persona, including normal). Fail-soft: any problem
+    // (engine unconfigured, DB hiccup, undecryptable fact) just skips the
+    // block — the chat itself never breaks over memory.
+    let memoryDoc = null;
+    if (username && isProUser && memoryCrypto.isConfigured()) {
+        try {
+            memoryDoc = await memoryService.loadMemory(username);
+            if (memoryService.memoryEnabled(memoryDoc)) {
+                const block = memoryService.buildMemoryBlock(memoryDoc);
+                if (block) effectivePrompt = `${effectivePrompt}\n\n${block}`;
+            }
+        } catch (_) { /* memory is best-effort */ }
+    }
+
     // DAILY FREE-AI TIME BUDGET (user order 2026-10-20): AI conversation
     // costs NO credits and is NEVER blocked by credit balance — but FREE
     // users share a 20-minute/day ONLINE AI pool (tracked via
@@ -60,7 +101,20 @@ async function chat(req, res) {
         const reply = await generateAIReply(message, effectivePrompt, userGeminiKey, modelToUse);
         // Contract unchanged: { success: true, reply, model } — the app's
         // /api/ai/chat and /api/chat callers see no shape change.
-        return res.json({ success: true, reply, model: modelToUse });
+        const sent = res.json({ success: true, reply, model: modelToUse });
+        // AI MEMORY EXTRACTION (2026-10-20): fire-and-forget AFTER the
+        // reply is sent — never blocks or fails the chat response. Learns
+        // durable facts the user stated about themselves (PRO + enabled
+        // only; the service re-checks both and fails soft on any error).
+        if (username && isProUser && memoryCrypto.isConfigured() && memoryService.memoryEnabled(memoryDoc)) {
+            memoryService.extractAndSave({
+                username,
+                userMessage: message,
+                assistantReply: reply,
+                userGeminiKey,
+            }).catch(() => {});
+        }
+        return sent;
     } catch (e) {
         // Never fabricate an AI reply on failure. Surface a clear, client-safe error.
         const status = (e.code === 'GEMINI_KEY_MISSING' || e.code === 'AI_KEY_MISSING') ? 503 : 500;

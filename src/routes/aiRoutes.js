@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const aiController = require('../controllers/aiController');
+const memoryController = require('../controllers/memoryController');
 const extractController = require('../controllers/extractController');
 const { authenticateUser } = require('../middleware/auth');
 
@@ -34,6 +35,13 @@ router.get('/ai/system-prompt', aiController.getSystemPrompt);
 // elapsed-time report for the FREE tier's 20 min/day ONLINE AI pool.
 router.get('/ai/usage', authenticateUser, aiController.getUsage);
 router.post('/ai/usage/report', authenticateUser, aiController.reportUsage);
+
+// AI MEMORY (2026-10-20): the owner's own long-term memory — PRO-only,
+// JWT identity only, NO admin route exists for this data by design.
+router.get('/ai/memory', authenticateUser, memoryController.getMemory);
+router.delete('/ai/memory/:factId', authenticateUser, memoryController.deleteFact);
+router.delete('/ai/memory', authenticateUser, memoryController.clearMemory);
+router.post('/ai/memory/settings', authenticateUser, memoryController.updateSettings);
 
 // ALL-IN-ONE DOWNLOADER (2026-10-20): one link in -> normalized format list
 // out. Providers are called server-side only; per-user throttle matches the
