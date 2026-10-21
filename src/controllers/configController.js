@@ -84,8 +84,8 @@ async function getAppConfig(req, res) {
 // { versionCode, versionName, downloadUrl, forceUpdate, message }.
 // Latest shipped release: versionCode 40 / "1.0.39" (2026-10-21). Bump
 // LATEST_VERSION_CODE / LATEST_VERSION_NAME when a newer APK ships.
-const LATEST_VERSION_CODE = 40;
-const LATEST_VERSION_NAME = '1.0.39';
+const LATEST_VERSION_CODE = 43;
+const LATEST_VERSION_NAME = '1.0.42';
 
 async function getAppVersion(req, res) {
     try {
