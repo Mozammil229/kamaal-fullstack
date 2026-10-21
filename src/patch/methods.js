@@ -42,6 +42,14 @@
  *     encoder), the copyright sentinel, and dashTags (te_is_reencode);
  *     dashTags are NOT written as iTunes "----" freeform boxes in keys
  *     style — they are keys entries like the rest.
+ *
+ * v43 (2026-10-21) — METHOD 3 (user-approved): the user's Python timescale
+ * system as a third method. NOT a metadata method: the recipe is a pure
+ * directive {mode: "timescale-normalize", targetFps: 30}. The client
+ * measures the video track's real fps from its stts table, then rescales
+ * the mvhd + every mdhd timescale by targetFps/fps (durations untouched)
+ * on a stream copy of the original file. No remux, no re-encode, NO
+ * metadata stamp — every stamp field below is null/empty by design.
  */
 
 'use strict';
@@ -129,12 +137,35 @@ const FORGE = Object.freeze({
     secondAudioTrack: SECOND_AUDIO_TRACK_FORGE
 });
 
-const METHODS = Object.freeze({ normal: PULSE, pro: FORGE });
+// ---- METHOD 3 — Python timescale system (v43, user-supplied method) --------
+// NOT a metadata method: this recipe is a pure client directive. The client
+// stream-copies the original file, measures the video track's real fps from
+// its stts table, and rescales the mvhd + every mdhd timescale by
+// targetFps/fps with durations untouched (the file then registers at
+// ~targetFps). No remux, no re-encode, NO metadata stamp — so every stamp
+// field is null/empty by design, and the client parser requires exactly
+// that shape for this mode (fail-closed).
+const METHOD3 = Object.freeze({
+    method: 'method3',
+    profile: 'method3',
+    mode: 'timescale-normalize',
+    targetFps: 30,
+    ftyp: null,
+    formatTags: Object.freeze({}),
+    dashTags: Object.freeze([]),
+    videoHandlerName: null,
+    audioHandlerName: null,
+    streamLanguage: null,
+    copyrightSource: null,
+    secondAudioTrack: null
+});
+
+const METHODS = Object.freeze({ normal: PULSE, pro: FORGE, method3: METHOD3 });
 
 /**
- * Returns a deep-cloned recipe object for the given method ("normal"|"pro"),
- * or null for an unknown method. Cloned so per-request code can never mutate
- * the frozen canonical definitions.
+ * Returns a deep-cloned recipe object for the given method
+ * ("normal"|"pro"|"method3"), or null for an unknown method. Cloned so
+ * per-request code can never mutate the frozen canonical definitions.
  */
 function getRecipe(method) {
     const m = METHODS[String(method || '').toLowerCase()];
