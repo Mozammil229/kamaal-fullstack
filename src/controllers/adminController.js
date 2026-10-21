@@ -116,7 +116,7 @@ async function getUsers(req, res) {
     }
 }
 
-// Update User (Credits, Pro, Expiry, Ban, Device Unlock)
+// Update User (Credits, Pro, Expiry, Ban, Device Unlock, Beta Membership)
 async function updateUser(req, res) {
     await connectToDatabase();
     const {
@@ -131,7 +131,8 @@ async function updateUser(req, res) {
         banReason,
         customPrompt,
         resetDevice,
-        adminNote
+        adminNote,
+        betaMember
     } = req.body;
 
     if (!username) return res.status(400).json({ success: false, error: 'Username required.' });
@@ -164,6 +165,7 @@ async function updateUser(req, res) {
         if (status !== undefined) user.status = status;
         if (banReason !== undefined) user.banReason = banReason;
         if (customPrompt !== undefined) user.customPrompt = customPrompt;
+        if (betaMember !== undefined) user.betaMember = Boolean(betaMember);
         if (resetDevice === true) user.deviceId = '';
         // PHASE E: only positive grants grow lifetime-earned (deducts/sets-down do not).
         bumpEarnedAndRetag(user, creditsDelta > 0 ? creditsDelta : 0);

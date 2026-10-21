@@ -991,6 +991,10 @@
                         <span class="px-2 py-0.5 rounded text-[10px] uppercase font-bold ${u.isPro ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'bg-gray-800 text-gray-400'}">
                             ${u.isPro ? '👑 ' + (u.proPlan || 'VIP') : 'Free Trial'}
                         </span>
+                        ${u.betaMember ? `
+                        <span class="px-2 py-0.5 rounded text-[10px] uppercase font-bold bg-teal-500/20 text-teal-300 border border-teal-500/30 ml-1">
+                            Beta
+                        </span>` : ``}
                         <span class="text-[10px] text-gray-500 block mt-0.5">${u.planExpiry || 'Lifetime'}</span>
                     </td>
                     <td class="p-3.5">
@@ -1011,9 +1015,37 @@
                         <button onclick="openUserModal('${u.username}')" class="bg-sky-500/20 hover:bg-sky-500/40 text-sky-300 border border-sky-500/40 px-2.5 py-1 rounded-lg font-bold text-xs transition">
                             <i class="fa-solid fa-pen-to-square mr-1"></i> Edit
                         </button>
+                        <button onclick="toggleBeta('${u.username}', ${u.betaMember ? 'false' : 'true'})" class="${u.betaMember ? 'bg-gray-700/40 hover:bg-rose-500/30 text-gray-300 hover:text-rose-300 border border-gray-600/40' : 'bg-teal-500/20 hover:bg-teal-500/40 text-teal-300 border border-teal-500/40'} px-2.5 py-1 rounded-lg font-bold text-xs transition ml-1" title="Beta membership (Story Video XML features)">
+                            ${u.betaMember ? 'Remove Beta' : 'Approve Beta'}
+                        </button>
                     </td>
                 </tr>
             `).join('');
+        }
+
+        // BETA MEMBERSHIP (Story Video v2 — Phase A, 2026-10-21): the admin
+        // approves/removes beta members here. The flag is enforced
+        // server-side: structured/XML features return 403 BETA_REQUIRED
+        // for users without it.
+        async function toggleBeta(username, makeMember) {
+            if (!confirm(makeMember
+                ? `Approve @${username} as a BETA member? They will get access to beta features (Story Video XML).`
+                : `Remove BETA membership from @${username}?`)) return;
+            try {
+                const res = await fetch('/api/admin/user/update', {
+                    method: 'POST',
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify({ username, betaMember: makeMember })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    fetchUsers();
+                } else {
+                    alert(data.error || 'Beta update failed');
+                }
+            } catch (e) {
+                alert(e.message);
+            }
         }
 
         function filterUsers() {

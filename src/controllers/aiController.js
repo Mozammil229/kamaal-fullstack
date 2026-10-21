@@ -13,7 +13,7 @@ const { connectToDatabase } = require('../config/db');
 // is ignored for these ids exactly like it is for every other request.
 // 'normal' / 'evil' / anything else keeps today's behavior untouched.
 // EXCEPTION (Story Video v2, Phase A — 2026-10-21): a request with
-// body.structured === true / 'true' takes the PRO-gated structured path
+// body.structured === true / 'true' takes the beta-gated structured path
 // in chat() below, where the client systemInstruction IS the prompt.
 const PRO_PERSONAS = {
     darkmind: personaPrompts.darkmind,
@@ -68,16 +68,18 @@ async function chat(req, res) {
         effectivePrompt = PRO_PERSONAS[personaId];
     }
 
-    // STRUCTURED PATH (Phase A): PRO / approved members only — same gate
-    // test (aiUsage.isUnlimited) and same 403 shape as the persona gate.
+    // STRUCTURED PATH (Phase A): BETA members only — the admin-approved
+    // User.betaMember flag is the gate (NOT PRO status: a PRO user without
+    // the flag is refused, a non-PRO user with the flag passes). Same 403
+    // envelope shape as the persona gate, with code BETA_REQUIRED.
     // The client's instruction becomes the system prompt verbatim
     // (sanitized): AppConfig prompt, customPrompt override and persona
     // selection are all superseded, and memory injection + extraction
     // below are skipped via the isStructured guards (nothing is read
     // into the prompt and nothing is learned from structured calls).
     if (isStructured) {
-        if (!isProUser) {
-            return res.status(403).json({ success: false, code: 'PRO_REQUIRED', error: 'Ye PRO feature hai.' });
+        if (!(dbUser && dbUser.betaMember === true)) {
+            return res.status(403).json({ success: false, code: 'BETA_REQUIRED', error: 'Ye feature sirf beta members ke liye hai.' });
         }
         const rawInstr = typeof req.body?.systemInstruction === 'string'
             ? req.body.systemInstruction

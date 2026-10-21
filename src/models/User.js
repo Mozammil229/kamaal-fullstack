@@ -20,6 +20,10 @@ const UserSchema = new mongoose.Schema({
     tag: { type: String, default: 'Desi Tadka' },
     fcmToken: { type: String, default: '', select: false },
     isPro: { type: Boolean, default: false },
+    // BETA MEMBERSHIP (Story Video v2, Phase A — 2026-10-21): admin-approved
+    // flag (admin panel toggle). Gates beta features server-side — e.g. the
+    // structured/XML path in /api/chat returns 403 BETA_REQUIRED without it.
+    betaMember: { type: Boolean, default: false },
     proPlan: { type: String, enum: ['none', 'trial', 'monthly', 'yearly', 'lifetime'], default: 'trial' },
     planExpiry: { type: String, default: 'Lifetime' },
     planExpiryDate: { type: Date, default: null },
