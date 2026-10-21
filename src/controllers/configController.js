@@ -78,23 +78,6 @@ async function getAppConfig(req, res) {
     }
 }
 
-// Kythera Video Engine Remote Config Endpoint (/api/config/kythera)
-function getKytheraConfig(req, res) {
-    return res.json({
-        status: 'ACTIVE',
-        statusMessage: 'Kammal Kythera Atom Engine • Ready',
-        convCrfExtra: '-bf 0',
-        convAudio: '-c:a aac -b:a 192k',
-        convGlobal: '-movflags +faststart',
-        compAudioCompress: '-c:a aac -b:a 128k',
-        compAudioCopy: '-c:a copy',
-        compMeta: '-map_metadata -1',
-        aiScale: '4',
-        aiCpuArgs: '-g -1',
-        lastSyncTimeMs: Date.now()
-    });
-}
-
 // Health Check (/api/health)
 async function getHealth(req, res) {
     const { isDbConnected } = require('../config/db');
@@ -109,6 +92,5 @@ async function getHealth(req, res) {
 module.exports = {
     getActiveConfig,
     getAppConfig,
-    getKytheraConfig,
     getHealth
 };

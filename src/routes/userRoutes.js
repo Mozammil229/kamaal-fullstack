@@ -1,13 +1,12 @@
 const express = require('express');
 const router = express.Router();
-const userKeyController = require('../controllers/userKeyController');
-const { authenticateUser } = require('../middleware/auth');
 
-// BYOK: Bring Your Own (Gemini) Key
-// All routes require a valid user JWT; the username is taken from the
-// verified token (req.user), never from client-supplied params.
-router.post('/user/gemini-key', authenticateUser, userKeyController.saveGeminiKey);
-router.delete('/user/gemini-key', authenticateUser, userKeyController.deleteGeminiKey);
-router.get('/user/gemini-key/status', authenticateUser, userKeyController.geminiKeyStatus);
+// BYOK (Bring Your Own Gemini Key) endpoints were removed on 2026-10-21
+// (Backend Safai package): the app no longer ships a BYOK surface, so
+// POST/DELETE /user/gemini-key and GET /user/gemini-key/status are gone,
+// along with their controller (userKeyController.js, deleted).
+// This router is intentionally empty now; it stays mounted in app.js so
+// the existing mount remains valid. The User.customGeminiKey schema field
+// is deliberately left in place — harmless in already-stored documents.
 
 module.exports = router;
