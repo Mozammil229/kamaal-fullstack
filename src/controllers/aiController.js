@@ -12,6 +12,9 @@ const { connectToDatabase } = require('../config/db');
 // The app sends just the persona id; the client-side systemInstruction
 // is ignored for these ids exactly like it is for every other request.
 // 'normal' / 'evil' / anything else keeps today's behavior untouched.
+// EXCEPTION (Story Video v2, Phase A — 2026-10-21): a request with
+// body.structured === true / 'true' takes the PRO-gated structured path
+// in chat() below, where the client systemInstruction IS the prompt.
 const PRO_PERSONAS = {
     darkmind: personaPrompts.darkmind,
     mentalist: personaPrompts.mentalist,
@@ -32,6 +35,11 @@ async function chat(req, res) {
     // victim's personal Gemini key quota).
     const username = req.user?.username;
     if (!message) return res.status(400).json({ success: false, error: 'Message required.' });
+
+    // STRUCTURED OUTPUT opt-in (Story Video v2, Phase A — 2026-10-21):
+    // boolean true or the string 'true'. Non-structured requests never
+    // enter the structured branch below; their path is unchanged.
+    const isStructured = req.body?.structured === true || req.body?.structured === 'true';
 
     let effectivePrompt = conf?.systemPrompt || 'You are Kammal AI, video optimization specialist.';
     // ROUND 2 (2026-10-21): BYOK fully retired — User.customGeminiKey is no
@@ -60,13 +68,34 @@ async function chat(req, res) {
         effectivePrompt = PRO_PERSONAS[personaId];
     }
 
+    // STRUCTURED PATH (Phase A): PRO / approved members only — same gate
+    // test (aiUsage.isUnlimited) and same 403 shape as the persona gate.
+    // The client's instruction becomes the system prompt verbatim
+    // (sanitized): AppConfig prompt, customPrompt override and persona
+    // selection are all superseded, and memory injection + extraction
+    // below are skipped via the isStructured guards (nothing is read
+    // into the prompt and nothing is learned from structured calls).
+    if (isStructured) {
+        if (!isProUser) {
+            return res.status(403).json({ success: false, code: 'PRO_REQUIRED', error: 'Ye PRO feature hai.' });
+        }
+        const rawInstr = typeof req.body?.systemInstruction === 'string'
+            ? req.body.systemInstruction
+            : (typeof req.body?.systemPrompt === 'string' ? req.body.systemPrompt : '');
+        const instr = rawInstr.trim().slice(0, 4000);
+        if (!instr) {
+            return res.status(400).json({ success: false, error: 'Structured system instruction required.' });
+        }
+        effectivePrompt = instr;
+    }
+
     // AI MEMORY INJECTION (2026-10-20): PRO users with memory enabled get
     // their decrypted long-term facts appended to the system instruction
     // (works with ANY persona, including normal). Fail-soft: any problem
     // (engine unconfigured, DB hiccup, undecryptable fact) just skips the
     // block — the chat itself never breaks over memory.
     let memoryDoc = null;
-    if (username && isProUser && memoryCrypto.isConfigured()) {
+    if (!isStructured && username && isProUser && memoryCrypto.isConfigured()) {
         try {
             memoryDoc = await memoryService.loadMemory(username);
             if (memoryService.memoryEnabled(memoryDoc)) {
@@ -108,7 +137,7 @@ async function chat(req, res) {
         // reply is sent — never blocks or fails the chat response. Learns
         // durable facts the user stated about themselves (PRO + enabled
         // only; the service re-checks both and fails soft on any error).
-        if (username && isProUser && memoryCrypto.isConfigured() && memoryService.memoryEnabled(memoryDoc)) {
+        if (!isStructured && username && isProUser && memoryCrypto.isConfigured() && memoryService.memoryEnabled(memoryDoc)) {
             memoryService.extractAndSave({
                 username,
                 userMessage: message,
