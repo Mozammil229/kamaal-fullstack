@@ -38,7 +38,7 @@ const AppConfigSchema = new mongoose.Schema({
         customPath: { type: String, default: 'online-tool' }
     },
     systemPrompt: { type: String, default: 'You are Kammal AI, a world-class video optimization, MP4 atom manipulation, and social viral algorithm specialist.' },
-    currentModel: { type: String, default: 'gemini-3.8-flash' },
+    currentModel: { type: String, default: 'gemini-2.5-flash' },
     referralReward: { type: Number, default: 10 }
 });
 

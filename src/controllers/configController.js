@@ -40,7 +40,7 @@ let localConfig = {
         customPath: 'online-tool'
     },
     systemPrompt: 'You are Kammal AI, a world-class video optimization specialist.',
-    currentModel: 'gemini-3.8-flash',
+    currentModel: 'gemini-2.5-flash',
     referralReward: 10
 };
 
@@ -78,6 +78,30 @@ async function getAppConfig(req, res) {
     }
 }
 
+// App Version Check (GET /api/app/version) — the in-app updater compares
+// the installed versionCode against this payload. Contract (Android
+// AppVersionResponse, parsed as the BARE body — no success envelope):
+// { versionCode, versionName, downloadUrl, forceUpdate, message }.
+// Latest shipped release: versionCode 40 / "1.0.39" (2026-10-21). Bump
+// LATEST_VERSION_CODE / LATEST_VERSION_NAME when a newer APK ships.
+const LATEST_VERSION_CODE = 40;
+const LATEST_VERSION_NAME = '1.0.39';
+
+async function getAppVersion(req, res) {
+    try {
+        const conf = await getActiveConfig();
+        return res.json({
+            versionCode: LATEST_VERSION_CODE,
+            versionName: LATEST_VERSION_NAME,
+            downloadUrl: conf?.updateUrl || '',
+            forceUpdate: !!conf?.forceUpdate,
+            message: conf?.updateNotes || ''
+        });
+    } catch (e) {
+        return res.status(500).json({ success: false, error: e.message });
+    }
+}
+
 // Health Check (/api/health)
 async function getHealth(req, res) {
     const { isDbConnected } = require('../config/db');
@@ -92,5 +116,6 @@ async function getHealth(req, res) {
 module.exports = {
     getActiveConfig,
     getAppConfig,
+    getAppVersion,
     getHealth
 };

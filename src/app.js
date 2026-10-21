@@ -12,6 +12,8 @@ const adminRoutes = require('./routes/adminRoutes');
 const onlineToolRoutes = require('./routes/onlineToolRoutes');
 // PHASE C — Admin messaging (blueprint §6/§7).
 const messageRoutes = require('./routes/messageRoutes');
+// Crash reports (app one-tap send, JWT-authenticated POST /api/crash-reports).
+const crashReportRoutes = require('./routes/crashReportRoutes');
 const deviceRoutes = require('./routes/deviceRoutes');
 const referralRoutes = require('./routes/referralRoutes');
 // PHASE F — server-side patcher: POST /api/patch/request, POST /api/patch/apply.
@@ -57,6 +59,8 @@ app.use('/api', socialRoutes);
 app.use('/uploads', express.static(path.join(__dirname, '..', 'public', 'uploads')));
 // PHASE C — Admin messaging (mounted at /api; routes carry their own paths).
 app.use('/api', messageRoutes);
+// Crash reports (mounted at /api; the route carries its own path).
+app.use('/api', crashReportRoutes);
 
 // 2. Direct Aliases required by Android Retrofit specifications:
 // - /api/register -> authController.register

@@ -1,17 +1,27 @@
 const dotenv = require('dotenv');
 dotenv.config();
 
+// ROUND 2 (2026-10-21): JWT secrets are REQUIRED — the old hardcoded
+// public fallbacks (visible in the previously-public repo) are removed.
+// Fail closed with a clear error instead of silently signing tokens with
+// a known secret. Production values live ONLY in the Vercel environment.
+for (const required of ['JWT_SECRET', 'ADMIN_JWT_SECRET']) {
+    if (!process.env[required] || !String(process.env[required]).trim()) {
+        throw new Error(`FATAL: ${required} is not set. Configure it in the server environment (Vercel dashboard) — there is no code fallback.`);
+    }
+}
+
 module.exports = {
     PORT: process.env.PORT || 3000,
     NODE_ENV: process.env.NODE_ENV || 'development',
     MONGODB_URI: process.env.MONGODB_URI || '',
-    JWT_SECRET: process.env.JWT_SECRET || 'kammal_secure_jwt_secret_change_in_production_2026',
+    JWT_SECRET: process.env.JWT_SECRET,
     ADMIN_USER: (process.env.ADMIN_USER || 'admin').trim(),
     // SECURITY FIX (#1): NO hardcoded default password. If ADMIN_PASS is not
     // set in the environment, direct-key admin auth is DISABLED (fail-closed).
     // The old default 'ADmin' was a public backdoor.
     ADMIN_PASS: (process.env.ADMIN_PASS || '').trim(),
-    ADMIN_JWT_SECRET: process.env.ADMIN_JWT_SECRET || process.env.JWT_SECRET || 'kammal_admin_jwt_secret_2026',
+    ADMIN_JWT_SECRET: process.env.ADMIN_JWT_SECRET,
     GEMINI_API_KEY: process.env.GEMINI_API_KEY || '',
     GEMINI_BACKUP_KEYS: process.env.GEMINI_BACKUP_KEYS || '',
     ADMIN_TOKEN_TTL_MS: 24 * 60 * 60 * 1000, // 24 hours

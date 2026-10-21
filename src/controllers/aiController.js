@@ -34,16 +34,18 @@ async function chat(req, res) {
     if (!message) return res.status(400).json({ success: false, error: 'Message required.' });
 
     let effectivePrompt = conf?.systemPrompt || 'You are Kammal AI, video optimization specialist.';
-    let userGeminiKey = '';
+    // ROUND 2 (2026-10-21): BYOK fully retired — User.customGeminiKey is no
+    // longer read or honored anywhere. Chat always uses the shared provider
+    // chain (Groq -> Gemini pool -> OpenRouter). The schema field stays in
+    // the User model (harmless, per the Safai decision) but is never read.
+    const userGeminiKey = '';
     let dbUser = null;
     if (username) {
-        // NOTE: customGeminiKey is select:false — explicitly include it.
-        const user = await User.findOne({ username }).select('+customGeminiKey');
+        const user = await User.findOne({ username });
         if (user) {
             dbUser = user;
             if (user.status === 'banned') return res.status(403).json({ success: false, error: 'Suspended.' });
             if (user.customPrompt?.trim()) effectivePrompt = user.customPrompt.trim();
-            userGeminiKey = user.customGeminiKey || '';
         }
     }
 
@@ -90,7 +92,7 @@ async function chat(req, res) {
         }
     }
 
-    const modelToUse = conf?.currentModel || 'gemini-3.8-flash';
+    const modelToUse = conf?.currentModel || 'gemini-2.5-flash';
     try {
         // PHASE H: multi-provider free fallback chain — Groq -> Gemini pool
         // (user's own key first, then shared pool) -> OpenRouter :free.
@@ -130,7 +132,7 @@ async function getSystemPrompt(req, res) {
         return res.json({
             success: true,
             systemPrompt: conf?.systemPrompt,
-            currentModel: conf?.currentModel || 'gemini-3.8-flash',
+            currentModel: conf?.currentModel || 'gemini-2.5-flash',
             featureFlags: conf?.featureFlags
         });
     } catch (e) {

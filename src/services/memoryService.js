@@ -121,9 +121,9 @@ async function extractAndSave({ username, userMessage, assistantReply, userGemin
         const system = memoryEngineMaster + '\n' + EXTRACTION_DIRECTIVE;
         let raw;
         try {
-            raw = await generateWithUserKeyFirst(userGeminiKey || '', content, system, 'gemini-3.8-flash');
+            raw = await generateWithUserKeyFirst(userGeminiKey || '', content, system, 'gemini-2.5-flash');
         } catch (_) {
-            try { raw = await generateWithKeyPool(content, system, 'gemini-3.8-flash'); } catch (_) { return false; }
+            try { raw = await generateWithKeyPool(content, system, 'gemini-2.5-flash'); } catch (_) { return false; }
         }
         const entries = parseExtractionJson(raw);
         if (!entries || entries.length === 0) return false;

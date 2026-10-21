@@ -169,6 +169,9 @@
             <button onclick="switchTab('remoteTab')" id="btnRemoteTab" class="tab-btn px-4 py-2 rounded-xl text-xs font-bold transition text-gray-400 hover:text-white">
                 <i class="fa-solid fa-sliders mr-1.5"></i> App Control & Upgrade Time
             </button>
+            <button onclick="switchTab('crashReportsTab')" id="btnCrashReportsTab" class="tab-btn px-4 py-2 rounded-xl text-xs font-bold transition text-gray-400 hover:text-white">
+                <i class="fa-solid fa-bug mr-1.5"></i> Crash Reports
+            </button>
         </nav>
 
         <!-- ============================================================== -->
@@ -345,7 +348,7 @@
         </div>
 
         <!-- ============================================================== -->
-        <!-- PHASE C: CHATS -- 1-to-1 support threads + broadcast composer -->
+        <!-- PHASE C: CHATS — 1-to-1 support threads + broadcast composer -->
         <!-- (UI is rendered by /js/admin-chats.js into #adminChatsRoot)   -->
         <!-- ============================================================== -->
         <div id="chatsTab" class="hidden space-y-6">
@@ -603,6 +606,30 @@
             </div>
         </div>
 
+        <!-- ============================================================== -->
+        <!-- TAB 6: CRASH REPORTS (ONE-TAP REPORTS FROM THE APP) -->
+        <!-- ============================================================== -->
+        <div id="crashReportsTab" class="hidden space-y-4">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h2 class="text-base font-bold text-white">Crash Reports</h2>
+                    <p class="text-xs text-gray-400">One-tap crash reports sent from users' phones. Click "Stack trace" on a report to expand it.</p>
+                </div>
+                <div class="flex space-x-2">
+                    <button onclick="loadCrashReports()" class="glass-card hover:bg-gray-800 px-3 py-1.5 rounded-xl text-xs text-gray-300 font-bold transition">
+                        <i class="fa-solid fa-rotate mr-1"></i> Refresh
+                    </button>
+                    <button onclick="clearCrashReports()" class="glass-card hover:bg-red-500/20 px-3 py-1.5 rounded-xl text-xs text-red-300 font-bold transition border border-red-500/30">
+                        <i class="fa-solid fa-trash mr-1"></i> Clear All
+                    </button>
+                </div>
+            </div>
+
+            <div id="crashReportsList" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="col-span-full p-8 text-center text-gray-500 glass-card rounded-2xl">Loading crash reports...</div>
+            </div>
+        </div>
+
     </div>
 
     <!-- ============================================================== -->
@@ -852,7 +879,7 @@
 
         // Tab Switching
         function switchTab(tabId) {
-            ['usersTab', 'broadcastTab', 'chatsTab', 'paymentsTab', 'keysTab', 'remoteTab'].forEach(id => {
+            ['usersTab', 'broadcastTab', 'chatsTab', 'paymentsTab', 'keysTab', 'remoteTab', 'crashReportsTab'].forEach(id => {
                 document.getElementById(id).classList.add('hidden');
             });
             document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -868,6 +895,7 @@
             if (tabId === 'paymentsTab') loadPayments();
             if (tabId === 'keysTab') loadKeysVault();
             if (tabId === 'remoteTab') loadRemoteConfig();
+            if (tabId === 'crashReportsTab') loadCrashReports();
         }
 
         // 2-Second Live Telemetry Radar
@@ -1533,6 +1561,99 @@
                 }
             } catch (err) {
                 alert(err.message);
+            }
+        }
+
+        // ---- Crash Reports (one-tap reports from the app) ----
+        // Stack traces are device-supplied text: escape everything before innerHTML.
+        function escapeHtml(s) {
+            return String(s == null ? '' : s)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        async function loadCrashReports() {
+            const container = document.getElementById('crashReportsList');
+            try {
+                const res = await fetch('/api/admin/crash-reports?limit=100', {
+                    headers: getAuthHeaders()
+                });
+                if (res.status === 401) {
+                    logoutAdmin();
+                    return;
+                }
+                const data = await res.json();
+                if (!data.success || !data.reports || data.reports.length === 0) {
+                    container.innerHTML = '<div class="col-span-full p-8 text-center text-gray-500 glass-card rounded-2xl">No crash reports yet.</div>';
+                    return;
+                }
+                container.innerHTML = data.reports.map(r => {
+                    const id = escapeHtml(r._id);
+                    const crashed = r.crashedAt ? new Date(r.crashedAt).toLocaleString() : '—';
+                    return `
+                    <div class="glass-card p-4 rounded-2xl border border-gray-800">
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="font-bold text-white">@${escapeHtml(r.username)}</span>
+                            <button onclick="deleteCrashReport('${id}')" class="text-[10px] text-red-300 hover:text-red-200 border border-red-500/30 rounded-lg px-2 py-1">
+                                <i class="fa-solid fa-trash mr-1"></i>Delete
+                            </button>
+                        </div>
+                        <p class="text-xs text-gray-300">Device: <strong class="text-white">${escapeHtml(r.deviceModel) || '—'}</strong></p>
+                        <p class="text-xs text-gray-300">Android: <strong class="text-white">${escapeHtml(r.androidVersion) || '—'}</strong> &middot; App: <strong class="text-white">${escapeHtml(r.appVersion) || '—'}${r.appVersionCode ? ' (' + escapeHtml(r.appVersionCode) + ')' : ''}</strong></p>
+                        <p class="text-[10px] text-gray-500 font-mono mt-1">Crashed: ${escapeHtml(crashed)}</p>
+                        <button onclick="toggleCrashTrace('${id}')" class="mt-2 text-[11px] text-sky-300 hover:text-sky-200 font-bold">
+                            <i class="fa-solid fa-chevron-down mr-1"></i>Stack trace
+                        </button>
+                        <pre id="trace-${id}" class="hidden mt-2 p-3 bg-gray-950/80 rounded-xl border border-gray-800 text-[10px] font-mono text-gray-300 max-h-64 overflow-y-auto custom-scroll whitespace-pre-wrap break-words">${escapeHtml(r.stackTrace) || '(empty)'}</pre>
+                    </div>`;
+                }).join('');
+            } catch (e) {
+                container.innerHTML = `<div class="col-span-full p-8 text-center text-rose-400 glass-card rounded-2xl">Error: ${escapeHtml(e.message)}</div>`;
+            }
+        }
+
+        function toggleCrashTrace(id) {
+            const el = document.getElementById('trace-' + id);
+            if (el) el.classList.toggle('hidden');
+        }
+
+        async function deleteCrashReport(id) {
+            if (!confirm('Delete this crash report?')) return;
+            try {
+                const res = await fetch('/api/admin/crash-reports/' + encodeURIComponent(id), {
+                    method: 'DELETE',
+                    headers: getAuthHeaders()
+                });
+                const data = await res.json();
+                if (data.success) {
+                    loadCrashReports();
+                } else {
+                    alert(data.error || 'Delete failed');
+                }
+            } catch (e) {
+                alert(e.message);
+            }
+        }
+
+        async function clearCrashReports() {
+            if (!confirm('Delete ALL crash reports? This cannot be undone.')) return;
+            try {
+                const res = await fetch('/api/admin/crash-reports', {
+                    method: 'DELETE',
+                    headers: getAuthHeaders()
+                });
+                const data = await res.json();
+                if (data.success) {
+                    alert(`Deleted ${data.deleted} report(s).`);
+                    loadCrashReports();
+                } else {
+                    alert(data.error || 'Clear failed');
+                }
+            } catch (e) {
+                alert(e.message);
             }
         }
 

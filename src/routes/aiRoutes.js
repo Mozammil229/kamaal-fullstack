@@ -30,7 +30,11 @@ function aiChatRateLimit(req, res, next) {
 router.post('/chat', authenticateUser, aiChatRateLimit, aiController.chat);
 // Alias used by some Android client builds (ApiService.chatWithAi)
 router.post('/ai/chat', authenticateUser, aiChatRateLimit, aiController.chat);
-router.get('/ai/system-prompt', aiController.getSystemPrompt);
+// SECURITY (Round 2, 2026-10-21): was PUBLIC — anyone could read the raw
+// system prompt unauthenticated. Now JWT-gated. The app still works: its
+// ApiClient authInterceptor injects the Bearer token on every request,
+// and fetchServerSystemPrompt() fails soft (null) when logged out.
+router.get('/ai/system-prompt', authenticateUser, aiController.getSystemPrompt);
 // DAILY FREE-AI TIME BUDGET (2026-10-20): remaining-seconds lookup +
 // elapsed-time report for the FREE tier's 20 min/day ONLINE AI pool.
 router.get('/ai/usage', authenticateUser, aiController.getUsage);

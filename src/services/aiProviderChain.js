@@ -136,14 +136,16 @@ async function tryGroq(message, systemInstruction) {
 }
 
 async function tryGemini(message, systemInstruction, userGeminiKey, geminiModelName) {
-    if (!gemini.hasConfiguredKeys() && !(userGeminiKey && String(userGeminiKey).trim().length > 10)) {
+    // Round 2 (2026-10-21): BYOK retired — userGeminiKey is accepted only
+    // for signature compatibility and never honored; the shared pool serves.
+    void userGeminiKey;
+    if (!gemini.hasConfiguredKeys()) {
         return null; // not configured
     }
     if (isCooling('gemini')) return null;
     try {
-        // Delegates to the existing pool: user's own key first (BYOK), then
-        // the shared pool with per-key 60s cooldown + dead-key skip.
-        const reply = await gemini.generateWithUserKeyFirst(userGeminiKey, message, systemInstruction, geminiModelName);
+        // Delegates to the shared pool (per-key 60s cooldown + dead-key skip).
+        const reply = await gemini.generateWithUserKeyFirst('', message, systemInstruction, geminiModelName);
         console.log('[AI chain] served by Gemini pool.');
         return reply;
     } catch (err) {

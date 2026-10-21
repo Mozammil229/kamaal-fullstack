@@ -16,16 +16,18 @@ const GEMINI_KEYS = Array.from(new Set(
 let keyIndex = 0;
 const rateLimitedKeys = new Map();
 
-async function generateWithKeys(keys, message, systemInstruction, modelName = 'gemini-3.8-flash') {
+async function generateWithKeys(keys, message, systemInstruction, modelName = 'gemini-2.5-flash') {
     if (!keys || keys.length === 0) {
         const err = new Error('Gemini API key is not configured on the server. Set GEMINI_API_KEY in the server environment variables.');
         err.code = 'GEMINI_KEY_MISSING';
         throw err;
     }
 
-    // Latest stable models first (per Google AI docs, Oct 2026).
-    // gemini-2.0-flash / 1.5-* are shut down by Google - never use them.
-    const modelsToTry = Array.from(new Set([modelName, 'gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-2.5-flash']));
+    // VERIFIED models only (Round 2 cleanup, 2026-10-21): the old list led
+    // with 'gemini-3.8-flash' / 'gemini-3.6-flash', which are NOT real
+    // Google model ids — every call wasted attempts on 404s before falling
+    // back. gemini-2.5-flash first, then its lite sibling.
+    const modelsToTry = Array.from(new Set([modelName, 'gemini-2.5-flash', 'gemini-2.5-flash-lite']));
     let lastError = null;
 
     for (let k = 0; k < keys.length; k++) {
@@ -77,23 +79,20 @@ async function generateWithKeyPool(message, systemInstruction, modelName) {
     return generateWithKeys(GEMINI_KEYS, message, systemInstruction, modelName);
 }
 
-// BYOK: try the requesting user's own key first; fall back to the shared pool.
+// LEGACY SIGNATURE (kept for caller compatibility): since Round 2
+// (2026-10-21) BYOK is retired — user-supplied keys are never honored;
+// the userKey argument is ignored and the shared pool always serves.
 async function generateWithUserKeyFirst(userKey, message, systemInstruction, modelName) {
-    const clean = String(userKey || '').trim();
-    if (clean.length > 10) {
-        try {
-            return await generateWithKeys([clean], message, systemInstruction, modelName);
-        } catch (e) {
-            console.warn('User Gemini key failed, falling back to shared pool.');
-        }
-    }
+    void userKey; // intentionally ignored — BYOK retired (Round 2, 2026-10-21)
     return generateWithKeyPool(message, systemInstruction, modelName);
 }
 
 // BYOK key test: tiny hello with ONLY the given key (no fallback). Throws if bad.
+// No remaining callers since the BYOK endpoints were removed in Safai;
+// kept as a harmless utility export.
 async function testUserKey(userKey) {
     const clean = String(userKey || '').trim();
-    return generateWithKeys([clean], 'Say hello in exactly 3 words.', 'You are a helpful assistant.', 'gemini-3.8-flash');
+    return generateWithKeys([clean], 'Say hello in exactly 3 words.', 'You are a helpful assistant.', 'gemini-2.5-flash');
 }
 
 module.exports = {
