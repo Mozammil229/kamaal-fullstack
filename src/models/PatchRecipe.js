@@ -17,7 +17,7 @@ const patchRecipeSchema = new mongoose.Schema({
     recipeId: { type: String, required: true, unique: true, index: true },
     username: { type: String, required: true, index: true },
     kamalId: { type: String, default: '' },
-    method: { type: String, enum: ['normal', 'pro'], required: true },
+    method: { type: String, enum: ['normal', 'pro', 'method3'], required: true },
     used: { type: Boolean, default: false, index: true },
     success: { type: Boolean, default: null },
     createdAt: { type: Date, default: Date.now },
