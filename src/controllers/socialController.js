@@ -78,6 +78,56 @@ function threadTitle(thread, me) {
     return other || 'Chat';
 }
 
+// PHASE 1 — per-member watermark read that works for both Mongoose Map
+// (live documents) and plain objects (lean results).
+function watermarkOf(mapLike, username) {
+    if (!mapLike || !username) return 0;
+    if (typeof mapLike.get === 'function') return mapLike.get(username) || 0;
+    return mapLike[username] || 0;
+}
+
+// PHASE 1 — canonical message serializer. Keeps every pre-Phase-1 field and
+// ADDS clientMsgId / replyToId / fileName / fileSize / editedAt / deletedAt /
+// reactions / deliveredTo / readBy. Tombstones (deletedAt set) expose empty
+// text/media so all clients converge. deliveredTo/readBy are DERIVED from
+// the thread's per-member watermarks; the sender always counts as both.
+function serializeSocialMessage(m, thread, me, tags) {
+    const deleted = m.deletedAt != null;
+    const deliveredTo = [];
+    const readBy = [];
+    if (thread) {
+        const senderKey = String(m.senderUsername || '').toLowerCase();
+        for (const name of thread.memberUsernames || []) {
+            const key = String(name).toLowerCase();
+            if (key === senderKey) { deliveredTo.push(name); readBy.push(name); continue; }
+            const dAt = watermarkOf(thread.membersLastDeliveredAt, name);
+            const rAt = watermarkOf(thread.membersLastReadAt, name);
+            if (dAt >= m.createdAt || rAt >= m.createdAt) deliveredTo.push(name);
+            if (rAt >= m.createdAt) readBy.push(name);
+        }
+    }
+    return {
+        id: m._id.toString(),
+        senderUsername: m.senderUsername,
+        senderTag: tags ? ((tags[m.senderUsername] || {}).tag || computeSocialTag(0)) : computeSocialTag(0),
+        kind: m.kind,
+        text: deleted ? '' : (m.text || ''),
+        mediaUrl: deleted ? '' : (m.mediaUrl || ''),
+        durationSec: m.durationSec || 0,
+        mine: m.senderUsername === me,
+        clientMsgId: m.clientMsgId || null,
+        replyToId: m.replyToId ? m.replyToId.toString() : null,
+        fileName: m.fileName || '',
+        fileSize: m.fileSize || 0,
+        editedAt: m.editedAt || null,
+        deletedAt: m.deletedAt || null,
+        reactions: deleted ? [] : (m.reactions || []).map(r => ({ username: r.username, emoji: r.emoji })),
+        deliveredTo,
+        readBy,
+        createdAt: m.createdAt
+    };
+}
+
 // ---- threads ---------------------------------------------------------------
 
 // GET /api/social/threads — my threads, newest first, with last-message preview.
@@ -98,10 +148,27 @@ async function listThreads(req, res) {
     const lastByThread = {};
     for (const row of lastMsgs) lastByThread[row._id.toString()] = row.msg;
     const tags = await tagMapFor(threads.flatMap(t => t.memberUsernames || []));
+    // PHASE 1 — unread counts from my read watermark (tombstones excluded;
+    // count query only runs when the thread actually has newer activity).
+    const unreadByThread = {};
+    await Promise.all(threads.map(async (t) => {
+        const myReadAt = watermarkOf(t.membersLastReadAt, me);
+        unreadByThread[t._id.toString()] = { readAt: myReadAt, count: 0 };
+        if ((t.lastMessageAt || 0) > myReadAt) {
+            unreadByThread[t._id.toString()].count = await SocialChatMessage.countDocuments({
+                threadId: t._id,
+                createdAt: { $gt: myReadAt },
+                deletedAt: null,
+                senderUsername: { $ne: me }
+            });
+        }
+    }));
     res.json({
         success: true,
         threads: threads.map(t => {
             const last = lastByThread[t._id.toString()];
+            const unread = unreadByThread[t._id.toString()] || { readAt: 0, count: 0 };
+            const lastDeleted = !!(last && last.deletedAt != null);
             return {
                 id: t._id.toString(),
                 type: t.type,
@@ -111,11 +178,14 @@ async function listThreads(req, res) {
                 memberUsernames: t.memberUsernames || [],
                 isGroupAdmin: (t.groupAdminUsernames || []).includes(me),
                 lastMessageAt: t.lastMessageAt,
+                lastReadAt: unread.readAt,
+                unreadCount: unread.count,
                 lastMessage: last ? {
                     kind: last.kind,
-                    text: last.text || '',
+                    text: lastDeleted ? '' : (last.text || ''),
                     senderUsername: last.senderUsername,
                     senderTag: (tags[last.senderUsername] || {}).tag || computeSocialTag(0),
+                    deleted: lastDeleted,
                     createdAt: last.createdAt
                 } : null
             };
@@ -219,20 +289,21 @@ async function getMessages(req, res) {
         createdAt: { $gt: since }
     }).sort({ createdAt: 1 }).limit(MESSAGE_LIMIT).lean();
     const tags = await tagMapFor(msgs.map(m => m.senderUsername));
+    // PHASE 1 — delivery watermark: this fetch delivered the returned
+    // messages to me. Stamp only up to the newest RETURNED message.
+    const newestReturned = msgs.length ? msgs[msgs.length - 1].createdAt : 0;
+    if (newestReturned > 0 && newestReturned > watermarkOf(thread.membersLastDeliveredAt, me)) {
+        await ChatThread.updateOne(
+            { _id: thread._id },
+            { $set: { [`membersLastDeliveredAt.${me}`]: newestReturned } }
+        );
+        if (!thread.membersLastDeliveredAt) thread.membersLastDeliveredAt = {};
+        thread.membersLastDeliveredAt[me] = newestReturned;
+    }
     res.json({
         success: true,
         thread: { id: thread._id.toString(), type: thread.type, title: threadTitle(thread, me), memberUsernames: thread.memberUsernames || [] },
-        messages: msgs.map(m => ({
-            id: m._id.toString(),
-            senderUsername: m.senderUsername,
-            senderTag: (tags[m.senderUsername] || {}).tag || computeSocialTag(0),
-            kind: m.kind,
-            text: m.text || '',
-            mediaUrl: m.mediaUrl || '',
-            durationSec: m.durationSec || 0,
-            mine: m.senderUsername === me,
-            createdAt: m.createdAt
-        }))
+        messages: msgs.map(m => serializeSocialMessage(m, thread, me, tags))
     });
 }
 
@@ -250,18 +321,32 @@ async function sendMessage(req, res) {
     if (!thread || !(thread.memberUsernames || []).includes(me)) {
         return res.status(404).json({ success: false, error: 'Chat not found.' });
     }
+    // PHASE 1 — idempotent send: a clientMsgId that already landed returns
+    // the ORIGINAL message (deduplicated) — retries never duplicate. The
+    // check runs BEFORE any upload processing so replays cost nothing.
+    const clientMsgIdRaw = String((req.body && req.body.clientMsgId) || '').trim();
+    const clientMsgId = clientMsgIdRaw ? clientMsgIdRaw.slice(0, 64) : null;
+    if (clientMsgId) {
+        const existing = await SocialChatMessage.findOne({ threadId: thread._id, clientMsgId }).lean();
+        if (existing) {
+            const tags = await tagMapFor([existing.senderUsername]);
+            return res.json({ success: true, deduplicated: true, message: serializeSocialMessage(existing, thread, me, tags) });
+        }
+    }
     const kind = String((req.body && req.body.kind) || 'text');
-    if (!['text', 'photo', 'voice'].includes(kind)) {
-        return res.status(400).json({ success: false, error: 'kind must be text, photo, or voice.' });
+    if (!['text', 'photo', 'voice', 'document'].includes(kind)) {
+        return res.status(400).json({ success: false, error: 'kind must be text, photo, voice, or document.' });
     }
     let mediaUrl = '';
     let durationSec = 0;
+    let fileName = '';
+    let fileSize = 0;
     const text = String((req.body && req.body.text) || '').trim().slice(0, 2000);
     if (kind === 'text') {
         if (!text) return res.status(400).json({ success: false, error: 'Message text required.' });
     } else {
         try {
-            const saved = await processUpload(req.file, kind === 'photo' ? 'photo' : 'voice');
+            const saved = await processUpload(req.file, kind);
             mediaUrl = saved.url;
         } catch (e) {
             return res.status(400).json({ success: false, error: e.message });
@@ -269,30 +354,57 @@ async function sendMessage(req, res) {
         if (kind === 'voice') {
             durationSec = Math.max(0, Math.min(600, parseInt((req.body && req.body.durationSec) || '0', 10) || 0));
         }
+        if (kind === 'document' && req.file) {
+            // Server-stored raw bytes win for size; the name is display-only
+            // metadata, reduced to a basename, never trusted as a path.
+            fileName = String(req.file.originalname || 'file').split(/[\\/]/).pop().slice(0, 120);
+            fileSize = Math.max(0, req.file.size || 0);
+        }
     }
-    const msg = await SocialChatMessage.create({
-        threadId: thread._id,
-        senderUsername: me,
-        kind,
-        text,
-        mediaUrl,
-        durationSec,
-        createdAt: Date.now()
-    });
-    thread.lastMessageAt = Date.now();
-    await thread.save();
-    res.json({
-        success: true,
-        message: {
-            id: msg._id.toString(),
+    // PHASE 1 — reply target must exist in THIS thread and not be deleted.
+    let replyToId = null;
+    const replyToRaw = String((req.body && req.body.replyToId) || '').trim();
+    if (replyToRaw) {
+        const target = await SocialChatMessage.findOne({ _id: replyToRaw, threadId: thread._id })
+            .select('_id deletedAt').lean().catch(() => null);
+        if (!target) return res.status(400).json({ success: false, error: 'Reply target not found in this chat.' });
+        if (target.deletedAt) return res.status(400).json({ success: false, error: 'Cannot reply to a deleted message.' });
+        replyToId = target._id;
+    }
+    let msg;
+    try {
+        msg = await SocialChatMessage.create({
+            threadId: thread._id,
             senderUsername: me,
             kind,
             text,
             mediaUrl,
             durationSec,
-            mine: true,
-            createdAt: msg.createdAt
+            clientMsgId,
+            replyToId,
+            fileName,
+            fileSize,
+            createdAt: Date.now()
+        });
+    } catch (dupErr) {
+        // Unique-index race: a concurrent replay created it first.
+        if (clientMsgId && dupErr && dupErr.code === 11000) {
+            const existing = await SocialChatMessage.findOne({ threadId: thread._id, clientMsgId }).lean();
+            if (existing) {
+                const tags = await tagMapFor([existing.senderUsername]);
+                return res.json({ success: true, deduplicated: true, message: serializeSocialMessage(existing, thread, me, tags) });
+            }
         }
+        console.error('[Social] sendMessage create failed', dupErr && dupErr.message);
+        return res.status(500).json({ success: false, error: 'Could not send message.' });
+    }
+    thread.lastMessageAt = msg.createdAt;
+    await thread.save();
+    const tags = await tagMapFor([me]);
+    res.json({
+        success: true,
+        deduplicated: false,
+        message: serializeSocialMessage(msg.toObject(), thread, me, tags)
     });
 }
 
@@ -358,6 +470,165 @@ async function updateGroupMembers(req, res) {
         memberCount: thread.memberUsernames.length,
         memberUsernames: thread.memberUsernames,
         groupAdminUsernames: thread.groupAdminUsernames
+    });
+}
+
+// ---- PHASE 1: read state, edit/delete, reactions, search -------------------
+
+async function loadMemberThread(req, res) {
+    const me = authedUsername(req);
+    if (!me) { res.status(401).json({ success: false, error: 'Authentication required.' }); return null; }
+    const thread = await ChatThread.findById(req.params.id);
+    if (!thread || !(thread.memberUsernames || []).includes(me)) {
+        res.status(404).json({ success: false, error: 'Chat not found.' });
+        return null;
+    }
+    return { thread, me };
+}
+
+// POST /api/social/threads/:id/read { upTo? } — my read watermark (implies delivered).
+async function markThreadRead(req, res) {
+    await connectToDatabase();
+    const ctx = await loadMemberThread(req, res);
+    if (!ctx) return;
+    const { thread, me } = ctx;
+    const upToRaw = parseInt((req.body && req.body.upTo) || '0', 10) || 0;
+    const upTo = Math.min(upToRaw > 0 ? upToRaw : Date.now(), Date.now());
+    if (upTo > watermarkOf(thread.membersLastReadAt, me)) thread.membersLastReadAt.set(me, upTo);
+    if (upTo > watermarkOf(thread.membersLastDeliveredAt, me)) thread.membersLastDeliveredAt.set(me, upTo);
+    await thread.save();
+    res.json({ success: true, readUpTo: watermarkOf(thread.membersLastReadAt, me) });
+}
+
+// PUT /api/social/threads/:id/messages/:messageId { text } — sender-only,
+// text kind only, never on a tombstone. No old text retained (editedAt only).
+async function editMessage(req, res) {
+    await connectToDatabase();
+    const me = authedUsername(req);
+    if (!me) return res.status(401).json({ success: false, error: 'Authentication required.' });
+    if (writeRateLimited(me)) {
+        return res.status(429).json({ success: false, error: 'You are sending too quickly. Please wait a bit and try again.' });
+    }
+    const ctx = await loadMemberThread(req, res);
+    if (!ctx) return;
+    const { thread } = ctx;
+    const msg = await SocialChatMessage.findOne({ _id: req.params.messageId, threadId: thread._id }).catch(() => null);
+    if (!msg) return res.status(404).json({ success: false, error: 'Message not found.' });
+    if (msg.senderUsername !== me) return res.status(403).json({ success: false, error: 'You can only edit your own messages.' });
+    if (msg.deletedAt) return res.status(400).json({ success: false, error: 'Message is deleted.' });
+    if (msg.kind !== 'text') return res.status(400).json({ success: false, error: 'Only text messages can be edited.' });
+    const text = String((req.body && req.body.text) || '').trim().slice(0, 2000);
+    if (!text) return res.status(400).json({ success: false, error: 'Message text required.' });
+    msg.text = text;
+    msg.editedAt = Date.now();
+    await msg.save();
+    const tags = await tagMapFor([msg.senderUsername]);
+    res.json({ success: true, message: serializeSocialMessage(msg.toObject(), thread, me, tags) });
+}
+
+// DELETE /api/social/threads/:id/messages/:messageId — tombstone for
+// everyone (row stays, content blanked). Own messages anytime; group
+// admins may also delete others' messages in their group.
+async function deleteMessage(req, res) {
+    await connectToDatabase();
+    const me = authedUsername(req);
+    if (!me) return res.status(401).json({ success: false, error: 'Authentication required.' });
+    if (writeRateLimited(me)) {
+        return res.status(429).json({ success: false, error: 'You are sending too quickly. Please wait a bit and try again.' });
+    }
+    const ctx = await loadMemberThread(req, res);
+    if (!ctx) return;
+    const { thread } = ctx;
+    const msg = await SocialChatMessage.findOne({ _id: req.params.messageId, threadId: thread._id }).catch(() => null);
+    if (!msg) return res.status(404).json({ success: false, error: 'Message not found.' });
+    const isSender = msg.senderUsername === me;
+    const isGroupAdmin = thread.type === 'group' && (thread.groupAdminUsernames || []).includes(me);
+    if (!isSender && !isGroupAdmin) {
+        return res.status(403).json({ success: false, error: 'You can only delete your own messages.' });
+    }
+    if (!msg.deletedAt) {
+        msg.deletedAt = Date.now();
+        msg.text = '';
+        msg.mediaUrl = '';
+        msg.reactions = [];
+        await msg.save();
+    }
+    const tags = await tagMapFor([msg.senderUsername]);
+    res.json({ success: true, message: serializeSocialMessage(msg.toObject(), thread, me, tags) });
+}
+
+// PUT /api/social/threads/:id/messages/:messageId/reaction { emoji|null }
+// One reaction per user per message; same emoji again (or null) removes it.
+async function reactMessage(req, res) {
+    await connectToDatabase();
+    const me = authedUsername(req);
+    if (!me) return res.status(401).json({ success: false, error: 'Authentication required.' });
+    if (writeRateLimited(me)) {
+        return res.status(429).json({ success: false, error: 'You are sending too quickly. Please wait a bit and try again.' });
+    }
+    const ctx = await loadMemberThread(req, res);
+    if (!ctx) return;
+    const { thread } = ctx;
+    const msg = await SocialChatMessage.findOne({ _id: req.params.messageId, threadId: thread._id }).catch(() => null);
+    if (!msg) return res.status(404).json({ success: false, error: 'Message not found.' });
+    if (msg.deletedAt) return res.status(400).json({ success: false, error: 'Message is deleted.' });
+    const raw = req.body ? req.body.emoji : null;
+    const emoji = raw == null ? null : String(raw).trim().slice(0, 16);
+    const mineIdx = (msg.reactions || []).findIndex(r => r.username === me);
+    if (!emoji || (mineIdx >= 0 && msg.reactions[mineIdx].emoji === emoji)) {
+        msg.reactions = (msg.reactions || []).filter(r => r.username !== me);
+    } else if (mineIdx >= 0) {
+        msg.reactions[mineIdx].emoji = emoji;
+        msg.markModified('reactions');
+    } else {
+        msg.reactions = [...(msg.reactions || []), { username: me, emoji }];
+    }
+    await msg.save();
+    const tags = await tagMapFor([msg.senderUsername]);
+    res.json({ success: true, message: serializeSocialMessage(msg.toObject(), thread, me, tags) });
+}
+
+// GET /api/social/threads/:id/search?q= — keyword search inside one thread.
+async function searchInThread(req, res) {
+    await connectToDatabase();
+    const ctx = await loadMemberThread(req, res);
+    if (!ctx) return;
+    const { thread, me } = ctx;
+    const q = String(req.query.q || '').trim();
+    if (q.length < 2) return res.json({ success: true, messages: [] });
+    const rows = await SocialChatMessage.find({
+        threadId: thread._id,
+        kind: 'text',
+        deletedAt: null,
+        text: { $regex: q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' }
+    }).sort({ createdAt: -1 }).limit(100).lean();
+    const tags = await tagMapFor(rows.map(m => m.senderUsername));
+    res.json({ success: true, messages: rows.map(m => serializeSocialMessage(m, thread, me, tags)) });
+}
+
+// GET /api/social/search?q= — keyword search across ALL my threads.
+async function searchGlobal(req, res) {
+    await connectToDatabase();
+    const me = authedUsername(req);
+    if (!me) return res.status(401).json({ success: false, error: 'Authentication required.' });
+    const q = String(req.query.q || '').trim();
+    if (q.length < 2) return res.json({ success: true, results: [] });
+    const myThreads = await ChatThread.find({ memberUsernames: me }).select('_id').lean();
+    const ids = myThreads.map(t => t._id);
+    if (!ids.length) return res.json({ success: true, results: [] });
+    const rows = await SocialChatMessage.find({
+        threadId: { $in: ids },
+        kind: 'text',
+        deletedAt: null,
+        text: { $regex: q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' }
+    }).sort({ createdAt: -1 }).limit(100).lean();
+    const tags = await tagMapFor(rows.map(m => m.senderUsername));
+    res.json({
+        success: true,
+        results: rows.map(m => ({
+            threadId: m.threadId.toString(),
+            message: serializeSocialMessage(m, null, me, tags)
+        }))
     });
 }
 
@@ -569,6 +840,12 @@ module.exports = {
     createThread,
     getMessages,
     sendMessage,
+    markThreadRead,
+    editMessage,
+    deleteMessage,
+    reactMessage,
+    searchInThread,
+    searchGlobal,
     updateGroupMembers,
     getFeed,
     createPost,

@@ -12,6 +12,11 @@ const ChatThreadSchema = new mongoose.Schema({
     memberUsernames: [{ type: String, index: true }],
     groupName: { type: String, default: '', maxlength: 80, trim: true },
     groupAdminUsernames: [{ type: String }],
+    // PHASE 1 — per-member delivery/read watermarks (epoch ms of the newest
+    // message that member's client has fetched / has read). Message-level
+    // deliveredTo[]/readBy[] in the API are DERIVED from these maps.
+    membersLastDeliveredAt: { type: Map, of: Number, default: {} },
+    membersLastReadAt: { type: Map, of: Number, default: {} },
     lastMessageAt: { type: Number, default: Date.now, index: true },
     createdAt: { type: Number, default: Date.now }
 });

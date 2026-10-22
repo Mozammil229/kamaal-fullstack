@@ -28,6 +28,13 @@ router.get('/social/threads', socialController.listThreads);
 router.post('/social/threads', socialController.createThread);
 router.get('/social/threads/:id/messages', socialController.getMessages);
 router.post('/social/threads/:id/messages', upload.single('file'), socialController.sendMessage);
+// PHASE 1 — reliable messaging core: read state, actions, search.
+router.post('/social/threads/:id/read', socialController.markThreadRead);
+router.put('/social/threads/:id/messages/:messageId', socialController.editMessage);
+router.delete('/social/threads/:id/messages/:messageId', socialController.deleteMessage);
+router.put('/social/threads/:id/messages/:messageId/reaction', socialController.reactMessage);
+router.get('/social/threads/:id/search', socialController.searchInThread);
+router.get('/social/search', socialController.searchGlobal);
 
 // groups
 router.post('/social/groups/:id/members', socialController.updateGroupMembers);
