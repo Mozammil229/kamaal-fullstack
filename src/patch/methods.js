@@ -94,7 +94,7 @@ const PULSE = Object.freeze({
     // as the Pulse reference carries them (©ART + ©cmt only).
     metaStyle: 'ilst',
     formatTags: Object.freeze({
-        artist: 'transcode.vague-infinity.com',
+        artist: 'Kamaal App',
         comment: 'Kamaal App'
     }),
     // (mean, name, value) triples written as iTunes "----" custom boxes.
@@ -123,9 +123,9 @@ const FORGE = Object.freeze({
     metaStyle: 'keys',
     metaKeys: Object.freeze(['artist', 'comment', 'copyright', 'te_is_reencode', 'encoder']),
     formatTags: Object.freeze({
-        artist: 'transcode.vague-infinity.com',
+        artist: 'Kamaal App',
         comment: 'Kamaal App',
-        encoder: 'Lavf60.16.100'
+        encoder: 'Kamaal App'
     }),
     dashTags: Object.freeze([
         Object.freeze({ mean: '', name: 'te_is_reencode', value: '1' })
