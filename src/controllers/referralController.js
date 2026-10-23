@@ -6,7 +6,7 @@
 // derives the SAME code locally with the identical formula, so the Account
 // screen can show it even before /api/referral/my is deployed.
 //
-// Reward: 20 credits to the referrer + 20 credits to the referred user,
+// Reward: 5 credits to the referrer + 5 credits to the referred user,
 // granted server-side only. One referral per Kamal ID (unique index on
 // Referral.referredKamalId) is the fraud guard against farming.
 //
@@ -21,8 +21,8 @@ const Referral = require('../models/Referral');
 const Transaction = require('../models/Transaction');
 const { bumpEarnedAndRetag } = require('../services/socialTagService');
 
-// Fixed reward per spec: 20 to the referrer, 20 to the newcomer.
-const REFERRAL_REWARD_CREDITS = 20;
+// Fixed reward per spec: 5 to the referrer, 5 to the newcomer.
+const REFERRAL_REWARD_CREDITS = 5;
 
 /**
  * Deterministic code: "KML-" + first 6 hex chars of
@@ -109,7 +109,7 @@ async function applyReferralFor({ code, user, kamalId }) {
         return { ok: false, status: 500, error: 'Referral save nahi ho saka. Thodi der baad try karo.' };
     }
 
-    // Award 20 + 20 server-side.
+    // Award 5 + 5 server-side.
     referrer.credits = (referrer.credits || 0) + REFERRAL_REWARD_CREDITS;
     bumpEarnedAndRetag(referrer, REFERRAL_REWARD_CREDITS);
     await referrer.save();
