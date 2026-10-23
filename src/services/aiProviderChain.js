@@ -6,8 +6,13 @@
 // (client -> POST /api/deduct) is UNTOUCHED — that is the monetization.
 // This file keeps the OWNER's cost at ~zero by chaining FREE provider tiers.
 //
-// Fallback order: Groq (free tier) -> Gemini free-tier key pool -> OpenRouter
-// free (:free) models. On 429/quota a provider is cooled down ~60s (same
+// Fallback order: Gemini free-tier key pool (PRIMARY) -> Groq (free tier,
+// FALLBACK — serves only when the whole Gemini chain fails) -> OpenRouter
+// free (:free) models. Order set 2026-10-24 on the owner's explicit order:
+// Gemini stays primary and the normal flow is unchanged; Groq is a pure
+// safety net. (Phase H originally tried Groq first; that required a real
+// GROQ_API_KEY, which was only supplied on 2026-10-24.)
+// On 429/quota a provider is cooled down ~60s (same
 // pattern as geminiService.js); a dead/revoked/invalid key is skipped ~1h.
 // ----------------------------------------------------------------------------
 // HONEST LIMITS — read before promising anything user-facing:
@@ -197,9 +202,14 @@ async function generateAIReply(message, systemInstruction, userGeminiKey, gemini
     }
     const failures = [];
 
+    // ORDER (owner order, 2026-10-24): Gemini pool FIRST (primary — the
+    // normal flow is byte-for-byte the pre-Groq behavior), Groq only when
+    // Gemini fails outright, OpenRouter last. An unconfigured provider
+    // returns null and is skipped quietly, so with no GROQ_API_KEY set
+    // this chain is exactly the old Gemini-only path.
     for (const attempt of [
-        () => tryGroq(message, systemInstruction),
         () => tryGemini(message, systemInstruction, userGeminiKey, geminiModelName),
+        () => tryGroq(message, systemInstruction),
         () => tryOpenRouter(message, systemInstruction)
     ]) {
         try {
