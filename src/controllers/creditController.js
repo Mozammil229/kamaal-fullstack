@@ -54,14 +54,6 @@ async function deductCredit(req, res) {
         const user = await User.findOne({ username: targetUser });
         if (!user) return res.status(404).json({ success: false, error: 'User not found.' });
 
-        // Pro users have unlimited access, don't deduct balance
-        if (user.isPro) {
-            if (reason?.includes('4K')) user.stats.videosEnhanced4K += 1;
-            else user.stats.videosPatched += 1;
-            await user.save();
-            return res.json({ success: true, remaining: user.credits, isPro: true });
-        }
-
         // Deduct using atomic ledger service
         const { user: updatedUser } = await modifyCredits({
             username: targetUser,
@@ -104,13 +96,6 @@ async function authorizePatch(req, res) {
         if (!user) return res.status(404).json({ authorized: false, error: 'User not found.' });
         if (user.status === 'banned') return res.status(403).json({ authorized: false, error: 'Account banned.' });
 
-        // Pro users: unlimited access, authorize without deducting.
-        if (user.isPro) {
-            user.stats.videosPatched += 1;
-            await user.save();
-            return res.json({ authorized: true, credits: user.credits, creditsRemaining: user.credits, isPro: true });
-        }
-
         // Atomic check-and-deduct: exactly 1 credit in a single ledger op.
         // modifyCredits uses findOneAndUpdate with a credits >= 1 filter, so
         // concurrent requests cannot overdraw; it throws 'Insufficient credits'
@@ -125,7 +110,7 @@ async function authorizePatch(req, res) {
             });
             updatedUser.stats.videosPatched += 1;
             await updatedUser.save();
-            return res.json({ authorized: true, credits: updatedUser.credits, creditsRemaining: updatedUser.credits, isPro: false });
+            return res.json({ authorized: true, credits: updatedUser.credits, creditsRemaining: updatedUser.credits, isPro: updatedUser.isPro });
         } catch (e) {
             if (e.message && e.message.includes('Insufficient credits')) {
                 return res.status(402).json({ authorized: false, error: 'No credits remaining. Please upgrade or redeem voucher.' });
