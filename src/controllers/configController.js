@@ -23,7 +23,11 @@ let localConfig = {
         paymentUpload: true,
         referralSystem: true,
         geminiChat: true,
-        videoPatching: true
+        videoPatching: true,
+        // VOXPILOT PHASE 2 (v58) parity with the AppConfig schema.
+        liveVoice: true,
+        liveTools: true,
+        liveAlwaysOn: true
     },
     whiteLabel: {
         appName: 'Kammal App',
@@ -40,6 +44,7 @@ let localConfig = {
         customPath: 'online-tool'
     },
     systemPrompt: 'You are Kammal AI, a world-class video optimization specialist.',
+    liveInstructions: '',
     currentModel: 'gemini-2.5-flash',
     referralReward: 10
 };

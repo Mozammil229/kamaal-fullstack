@@ -21,7 +21,12 @@ const AppConfigSchema = new mongoose.Schema({
         paymentUpload: { type: Boolean, default: true },
         referralSystem: { type: Boolean, default: true },
         geminiChat: { type: Boolean, default: true },
-        videoPatching: { type: Boolean, default: true }
+        videoPatching: { type: Boolean, default: true },
+        // VOXPILOT PHASE 2 (v58): Live voice master switch, Live tool
+        // graft switch, and Always-On (background listening) permission.
+        liveVoice: { type: Boolean, default: true },
+        liveTools: { type: Boolean, default: true },
+        liveAlwaysOn: { type: Boolean, default: true }
     },
     whiteLabel: {
         appName: { type: String, default: 'Kammal App' },
@@ -38,6 +43,9 @@ const AppConfigSchema = new mongoose.Schema({
         customPath: { type: String, default: 'online-tool' }
     },
     systemPrompt: { type: String, default: 'You are Kammal AI, a world-class video optimization, MP4 atom manipulation, and social viral algorithm specialist.' },
+    // VOXPILOT PHASE 2 (v58): admin-editable extra instructions locked into
+    // Live voice sessions at token-mint time (appended to systemPrompt).
+    liveInstructions: { type: String, default: '' },
     currentModel: { type: String, default: 'gemini-2.5-flash' },
     referralReward: { type: Number, default: 10 }
 });

@@ -163,6 +163,7 @@ async function getSystemPrompt(req, res) {
         return res.json({
             success: true,
             systemPrompt: conf?.systemPrompt,
+            liveInstructions: conf?.liveInstructions || '',
             currentModel: conf?.currentModel || 'gemini-2.5-flash',
             featureFlags: conf?.featureFlags
         });

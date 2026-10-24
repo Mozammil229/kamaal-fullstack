@@ -113,5 +113,8 @@ module.exports = {
     generateWithKeyPool,
     generateWithUserKeyFirst,
     testUserKey,
+    // VOXPILOT PHASE 2 (v58): Live ephemeral-token minting needs the pool
+    // order (primary first). Returns a copy; never logs keys.
+    getGeminiKeys: () => GEMINI_KEYS.slice(),
     hasConfiguredKeys: () => GEMINI_KEYS.length > 0
 };

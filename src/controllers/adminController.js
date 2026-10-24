@@ -414,6 +414,7 @@ async function updateConfig(req, res) {
         referralReward,
         systemPrompt,
         currentModel,
+        liveInstructions,
         onlineTool
     } = req.body;
 
@@ -439,6 +440,8 @@ async function updateConfig(req, res) {
         if (referralReward !== undefined) conf.referralReward = Number(referralReward);
         if (systemPrompt !== undefined) conf.systemPrompt = systemPrompt;
         if (currentModel !== undefined) conf.currentModel = currentModel;
+        // VOXPILOT PHASE 2 (v58): admin-editable Live custom instructions.
+        if (liveInstructions !== undefined) conf.liveInstructions = String(liveInstructions).slice(0, 4000);
         if (onlineTool !== undefined && onlineTool !== null && typeof onlineTool === 'object') {
             const prev = (conf.onlineTool && typeof conf.onlineTool.toObject === 'function')
                 ? conf.onlineTool.toObject() : (conf.onlineTool || {});

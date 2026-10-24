@@ -491,6 +491,19 @@
                                 <input type="checkbox" id="featReferral" class="w-4 h-4 accent-emerald-500">
                                 <span>Refer & Earn System</span>
                             </label>
+                            <!-- VOXPILOT PHASE 2 (v58): Live voice master, tool graft, Always-On permission. -->
+                            <label class="flex items-center space-x-2.5 p-2.5 bg-gray-900/90 rounded-xl border border-gray-800 cursor-pointer">
+                                <input type="checkbox" id="featLiveVoice" class="w-4 h-4 accent-emerald-500">
+                                <span>Live Voice (ephemeral token)</span>
+                            </label>
+                            <label class="flex items-center space-x-2.5 p-2.5 bg-gray-900/90 rounded-xl border border-gray-800 cursor-pointer">
+                                <input type="checkbox" id="featLiveTools" class="w-4 h-4 accent-emerald-500">
+                                <span>Live Voice Tools (alarm/app/media)</span>
+                            </label>
+                            <label class="flex items-center space-x-2.5 p-2.5 bg-gray-900/90 rounded-xl border border-gray-800 cursor-pointer">
+                                <input type="checkbox" id="featLiveAlwaysOn" class="w-4 h-4 accent-emerald-500">
+                                <span>Always-On Voice (background)</span>
+                            </label>
                         </div>
                         <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 rounded-xl text-xs transition mt-2">
                             SAVE FEATURE SWITCHBOARD
@@ -551,6 +564,11 @@
                         <div>
                             <label class="text-[11px] text-gray-400 block mb-1">Global System Prompt (Instructions for AI responses)</label>
                             <textarea id="aiSystemPromptText" rows="3"
+                                class="w-full bg-gray-900 border border-gray-700 rounded-xl p-3 text-xs text-white custom-scroll font-mono"></textarea>
+                        </div>
+                        <div>
+                            <label class="text-[11px] text-gray-400 block mb-1">Live Voice Custom Instructions (locked into Live sessions at token mint; empty = none)</label>
+                            <textarea id="aiLiveInstructionsText" rows="2"
                                 class="w-full bg-gray-900 border border-gray-700 rounded-xl p-3 text-xs text-white custom-scroll font-mono"></textarea>
                         </div>
                         <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2.5 rounded-xl text-xs transition">
@@ -1340,7 +1358,10 @@
                 communityChat: document.getElementById('featChat').checked,
                 videoPatching: document.getElementById('featPatch').checked,
                 paymentUpload: document.getElementById('featPayment').checked,
-                referralSystem: document.getElementById('featReferral').checked
+                referralSystem: document.getElementById('featReferral').checked,
+                liveVoice: document.getElementById('featLiveVoice').checked,
+                liveTools: document.getElementById('featLiveTools').checked,
+                liveAlwaysOn: document.getElementById('featLiveAlwaysOn').checked
             };
 
             try {
@@ -1393,12 +1414,13 @@
             e.preventDefault();
             const currentModel = document.getElementById('aiModelSelect').value;
             const systemPrompt = document.getElementById('aiSystemPromptText').value.trim();
+            const liveInstructions = document.getElementById('aiLiveInstructionsText').value.trim();
 
             try {
                 const res = await fetch('/api/admin/config/update', {
                     method: 'POST',
                     headers: getAuthHeaders(),
-                    body: JSON.stringify({ currentModel, systemPrompt })
+                    body: JSON.stringify({ currentModel, systemPrompt, liveInstructions })
                 });
                 const data = await res.json();
                 if (data.success) {
@@ -1465,6 +1487,9 @@
                         document.getElementById('featChat').checked = data.featureFlags.communityChat !== false;
                         document.getElementById('featPatch').checked = data.featureFlags.videoPatching !== false;
                         document.getElementById('featPayment').checked = data.featureFlags.paymentUpload !== false;
+                        document.getElementById('featLiveVoice').checked = data.featureFlags.liveVoice !== false;
+                        document.getElementById('featLiveTools').checked = data.featureFlags.liveTools !== false;
+                        document.getElementById('featLiveAlwaysOn').checked = data.featureFlags.liveAlwaysOn !== false;
                         document.getElementById('featReferral').checked = data.featureFlags.referralSystem !== false;
                     }
                     if (data.whiteLabel && data.whiteLabel.supportContact) {
@@ -1483,6 +1508,7 @@
                 if (aiData.success) {
                     if (aiData.currentModel) document.getElementById('aiModelSelect').value = aiData.currentModel;
                     if (aiData.systemPrompt) document.getElementById('aiSystemPromptText').value = aiData.systemPrompt;
+                    if (aiData.liveInstructions !== undefined) document.getElementById('aiLiveInstructionsText').value = aiData.liveInstructions || '';
                 }
             } catch (_) {}
         }

@@ -30,6 +30,28 @@ function aiChatRateLimit(req, res, next) {
 router.post('/chat', authenticateUser, aiChatRateLimit, aiController.chat);
 // Alias used by some Android client builds (ApiService.chatWithAi)
 router.post('/ai/chat', authenticateUser, aiChatRateLimit, aiController.chat);
+// VOXPILOT PHASE 2 (v58) — POST /api/live/token: mints a short-lived,
+// single-use Gemini Live ephemeral token (liveController). The server key
+// never reaches the phone. 10 mints/min per user: a reconnect re-mints,
+// but a mint is cheap and a tight bucket stops quota burn from a loop.
+const liveTokenBuckets = new Map();
+function liveTokenRateLimit(req, res, next) {
+    const key = req.user?.username || req.ip || 'unknown';
+    const now = Date.now();
+    const windowMs = 60 * 1000;
+    const max = 10;
+    let entry = liveTokenBuckets.get(key);
+    if (!entry || now - entry.start > windowMs) entry = { start: now, count: 0 };
+    entry.count += 1;
+    liveTokenBuckets.set(key, entry);
+    if (liveTokenBuckets.size > 5000) liveTokenBuckets.clear();
+    if (entry.count > max) {
+        return res.status(429).json({ success: false, error: 'Too many Live token requests. Please wait a moment.' });
+    }
+    next();
+}
+const liveController = require('../controllers/liveController');
+router.post('/live/token', authenticateUser, liveTokenRateLimit, liveController.mintLiveToken);
 // SECURITY (Round 2, 2026-10-21): was PUBLIC — anyone could read the raw
 // system prompt unauthenticated. Now JWT-gated. The app still works: its
 // ApiClient authInterceptor injects the Bearer token on every request,
