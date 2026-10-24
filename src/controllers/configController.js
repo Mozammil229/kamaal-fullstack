@@ -44,7 +44,11 @@ let localConfig = {
         customPath: 'online-tool'
     },
     systemPrompt: 'You are Kammal AI, a world-class video optimization specialist.',
-    liveInstructions: '',
+    // v59: default Live custom instructions = flash answer-style rule
+    // (admin-editable in panel; keep in sync with DEFAULT_LIVE_INSTRUCTIONS
+    // in liveTokenService.js). The locked LIVE_ANSWER_STYLE block enforces
+    // the same rule even when this field is empty.
+    liveInstructions: 'Jawab hamesha 1 se 6 short lines mein do, dostana aur seedha — bina soche hue dikhaye, bina lambi tafseel ke.',
     currentModel: 'gemini-2.5-flash',
     referralReward: 10
 };

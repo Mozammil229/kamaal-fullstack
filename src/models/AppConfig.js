@@ -45,7 +45,9 @@ const AppConfigSchema = new mongoose.Schema({
     systemPrompt: { type: String, default: 'You are Kammal AI, a world-class video optimization, MP4 atom manipulation, and social viral algorithm specialist.' },
     // VOXPILOT PHASE 2 (v58): admin-editable extra instructions locked into
     // Live voice sessions at token-mint time (appended to systemPrompt).
-    liveInstructions: { type: String, default: '' },
+    // v59: default carries the flash answer-style rule (admin-editable);
+    // keep in sync with DEFAULT_LIVE_INSTRUCTIONS in liveTokenService.js.
+    liveInstructions: { type: String, default: 'Jawab hamesha 1 se 6 short lines mein do, dostana aur seedha — bina soche hue dikhaye, bina lambi tafseel ke.' },
     currentModel: { type: String, default: 'gemini-2.5-flash' },
     referralReward: { type: Number, default: 10 }
 });
