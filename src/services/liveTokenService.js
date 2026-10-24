@@ -89,12 +89,11 @@ const LIVE_TOOLS = [
                 name: 'message_contact',
                 description: 'Queue a message to a contact (SMS or WhatsApp). NEVER sends directly — it only queues for the user to confirm on screen.',
                 parameters: { type: 'OBJECT', properties: { name: { type: 'STRING' }, message: { type: 'STRING' }, via: { type: 'STRING', description: 'sms or whatsapp' } }, required: ['name', 'message'] }
-            },
-            {
-                name: 'whatsapp_call',
-                description: 'Queue a WhatsApp voice/video call to a contact. NEVER places it directly — it only queues for the user to confirm on screen.',
-                parameters: { type: 'OBJECT', properties: { name: { type: 'STRING' }, video: { type: 'BOOLEAN' } }, required: ['name'] }
             }
+            // NOTE: no whatsapp_call — the app has no confirm-first
+            // WhatsApp-call path (PendingAssistantAction has no WhatsApp-call
+            // variant); declaring it would let the model call a tool the app
+            // cannot honour. Add it when that confirm path exists.
         ]
     }
 ];
