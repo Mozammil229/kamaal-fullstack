@@ -21,6 +21,13 @@ const PRO_PERSONAS = {
     satirist: personaPrompts.satirist,
 };
 
+// FREE PERSONAS (v64, 2026-10-25): 'cyber' is free for ALL users —
+// no PRO gate. The prompt lives ONLY on the server (personaPrompts.js);
+// the app sends just the persona id.
+const FREE_PERSONAS = {
+    cyber: personaPrompts.cyber,
+};
+
 // AI Chat Controller (/api/chat)
 async function chat(req, res) {
     await connectToDatabase();
@@ -66,6 +73,11 @@ async function chat(req, res) {
             return res.status(403).json({ success: false, code: 'PRO_REQUIRED', error: 'Ye PRO feature hai.' });
         }
         effectivePrompt = PRO_PERSONAS[personaId];
+    }
+
+    // FREE PERSONA (v64): 'cyber' applies for every user, PRO or not.
+    if (Object.prototype.hasOwnProperty.call(FREE_PERSONAS, personaId)) {
+        effectivePrompt = FREE_PERSONAS[personaId];
     }
 
     // STRUCTURED PATH (Phase A): BETA members only — the admin-approved
