@@ -6,7 +6,7 @@
 // expiresAt, newSessionExpiresAt, uses }. The token value itself is the
 // only credential in the response; the server key is never included.
 const { getActiveConfig } = require('./configController');
-const { mintEphemeralToken, LIVE_MODELS, DEFAULT_LIVE_MODEL, LIVE_WS_URL } = require('../services/liveTokenService');
+const { mintEphemeralToken, LIVE_MODELS, DEFAULT_LIVE_MODEL, LIVE_WS_URL, LIVE_VOICES } = require('../services/liveTokenService');
 
 async function mintLiveToken(req, res) {
     const username = req.user && req.user.username;
@@ -15,6 +15,13 @@ async function mintLiveToken(req, res) {
     const requestedModel = req.body && typeof req.body.model === 'string' ? req.body.model.trim() : '';
     if (requestedModel && !LIVE_MODELS.includes(requestedModel)) {
         return res.status(400).json({ success: false, error: 'Unknown Live model: ' + requestedModel.slice(0, 80) });
+    }
+
+    // v61 — Live voice styles: the app may ask for one of the five
+    // prebuilt voices; anything else is a 400 (never silently remapped).
+    const requestedVoice = req.body && typeof req.body.voice === 'string' ? req.body.voice.trim() : '';
+    if (requestedVoice && !LIVE_VOICES.includes(requestedVoice)) {
+        return res.status(400).json({ success: false, error: 'Unknown Live voice: ' + requestedVoice.slice(0, 40) });
     }
 
     try {
@@ -26,6 +33,7 @@ async function mintLiveToken(req, res) {
         const toolsEnabled = flags.liveTools !== false;
         const minted = await mintEphemeralToken({
             model: requestedModel || DEFAULT_LIVE_MODEL,
+            voice: requestedVoice || undefined,
             systemPrompt: conf && conf.systemPrompt,
             liveInstructions: conf && conf.liveInstructions,
             toolsEnabled
@@ -35,7 +43,7 @@ async function mintLiveToken(req, res) {
             token: minted.token,
             wsUrl: LIVE_WS_URL,
             model: minted.model,
-            voice: 'Puck',
+            voice: minted.voice,
             expiresAt: minted.expiresAt,
             newSessionExpiresAt: minted.newSessionExpiresAt,
             uses: minted.uses,
