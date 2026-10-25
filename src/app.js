@@ -14,6 +14,8 @@ const onlineToolRoutes = require('./routes/onlineToolRoutes');
 const messageRoutes = require('./routes/messageRoutes');
 // Crash reports (app one-tap send, JWT-authenticated POST /api/crash-reports).
 const crashReportRoutes = require('./routes/crashReportRoutes');
+// v66 — Wink AI video enhance (stateless JSON proxy; server never gets video bytes).
+const winkRoutes = require('./routes/winkRoutes');
 const deviceRoutes = require('./routes/deviceRoutes');
 const referralRoutes = require('./routes/referralRoutes');
 // PHASE F — server-side patcher: POST /api/patch/request, POST /api/patch/apply.
@@ -61,6 +63,8 @@ app.use('/uploads', express.static(path.join(__dirname, '..', 'public', 'uploads
 app.use('/api', messageRoutes);
 // Crash reports (mounted at /api; the route carries its own path).
 app.use('/api', crashReportRoutes);
+// v66 — Wink AI video enhance (mounted at /api; routes carry /wink/* paths).
+app.use('/api', winkRoutes);
 
 // 2. Direct Aliases required by Android Retrofit specifications:
 // - /api/register -> authController.register
