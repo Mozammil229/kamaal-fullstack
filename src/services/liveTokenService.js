@@ -222,15 +222,21 @@ function buildSetup(model, systemInstruction, toolsEnabled, voice) {
                 }
             }
         },
-        // v61 VAD tuning: HIGH end-sensitivity answers sooner after the
-        // user stops speaking (same values the app sends in its setup,
-        // so client + server agree on the Constrained endpoint).
-        // Tradeoff: can cut off slow speakers who pause mid-sentence.
+        // v61 VAD tuning: HIGH end-sensitivity + 500ms silence window
+        // (server default ~800ms) end the turn sooner after the user
+        // stops speaking. CORRECT field names per Google's Live API
+        // reference (ai.google.dev/api/live): startOfSpeechSensitivity /
+        // endOfSpeechSensitivity with START/END_SENSITIVITY_HIGH values
+        // — the first attempt used startSensitivity/endSensitivity and
+        // Google's auth_tokens endpoint rejected the mint ("Unknown
+        // name startSensitivity"). Same values the app sends in its
+        // setup, so client + server agree on the Constrained endpoint.
         realtimeInputConfig: {
             automaticActivityDetection: {
                 disabled: false,
-                startSensitivity: 'HIGH',
-                endSensitivity: 'HIGH'
+                startOfSpeechSensitivity: 'START_SENSITIVITY_HIGH',
+                endOfSpeechSensitivity: 'END_SENSITIVITY_HIGH',
+                silenceDurationMs: 500
             }
         },
         systemInstruction: { parts: [{ text: systemInstruction }] },
