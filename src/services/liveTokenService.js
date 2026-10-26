@@ -207,6 +207,26 @@ const LIVE_TOOLS = [
                 name: 'read_notifications',
                 description: 'Read the most recent phone notifications (app, sender, message) as a short summary. READ-ONLY: never reply to a notification, never act on one.',
                 parameters: { type: 'OBJECT', properties: { app: { type: 'STRING', description: 'Optional app name filter, e.g. WhatsApp' }, count: { type: 'NUMBER', description: 'How many, 1-10, default 5' } } }
+            },
+            // v81 GOD MODE Phase 1b — Live voice permission control.
+            // Mirrors the app's VoxLiveTools declarations exactly (same
+            // names, params, descriptions). The token locks this setup,
+            // so the app's setup must match field-for-field or the
+            // Constrained endpoint risks a 400 handshake rejection.
+            {
+                name: 'check_permissions',
+                description: 'Check which permissions the agent needs are on or off (mic, contacts, notifications, accessibility, overlay). READ-ONLY: never grants anything.',
+                parameters: { type: 'OBJECT', properties: { keys: { type: 'STRING', description: 'Comma-separated keys, e.g. \'mic,contacts\', a group id, or \'all\'. Empty = the five the agent needs.' } } }
+            },
+            {
+                name: 'request_permission',
+                description: 'Ask the user to grant ONE permission: explain why, then open the legitimate flow (Permissions hub for runtime prompts, or the exact Settings page). The grant itself is always the user\'s own tap — Live never self-grants.',
+                parameters: { type: 'OBJECT', properties: { key: { type: 'STRING', description: 'Permission key, e.g. mic, contacts, notifications, accessibility, overlay, battery, all files' } }, required: ['key'] }
+            },
+            {
+                name: 'open_permissions_hub',
+                description: 'Open the Permissions hub screen (optionally at one group) so the user can see and grant permissions.',
+                parameters: { type: 'OBJECT', properties: { group: { type: 'STRING', description: 'Group id, e.g. location, files, camera, calls, contacts, notifications, connectivity, sensors, control, background. Empty = whole hub.' } } }
             }
         ]
     }
