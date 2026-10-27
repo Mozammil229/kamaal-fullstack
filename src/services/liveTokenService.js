@@ -227,6 +227,26 @@ const LIVE_TOOLS = [
                 name: 'open_permissions_hub',
                 description: 'Open the Permissions hub screen (optionally at one group) so the user can see and grant permissions.',
                 parameters: { type: 'OBJECT', properties: { group: { type: 'STRING', description: 'Group id, e.g. location, files, camera, calls, contacts, notifications, connectivity, sensors, control, background. Empty = whole hub.' } } }
+            },
+            // v87 GOD MODE Phase 2 — Download + Settings + drafts.
+            // Mirrors the app's VoxLiveTools declarations exactly (same
+            // names, params, descriptions). The token locks this setup,
+            // so the app's setup must match field-for-field or the
+            // Constrained endpoint risks a 400 handshake rejection.
+            {
+                name: 'download_control',
+                description: 'Control a download by title or id: pause, resume, cancel, retry, continue_all, remove, list, set_folder, get_folder. Retry of a FAILED download continues from its saved parts, never from zero. A title matching several downloads is AMBIGUOUS — ask the user, never guess.',
+                parameters: { type: 'OBJECT', properties: { action: { type: 'STRING', description: 'pause, resume, cancel, retry, continue_all, remove, list, set_folder or get_folder' }, title: { type: 'STRING', description: 'Download title (exact, e.g. the video name)' }, id: { type: 'STRING', description: 'Download id (use instead of title when known)' }, folder: { type: 'STRING', description: 'New Downloads subfolder name, for set_folder' } }, required: ['action'] }
+            },
+            {
+                name: 'app_settings',
+                description: 'Change an app setting and verify it stuck: set_theme (system/light/dark), set_accent (violet/galaxy/rose/aurora/solar/ocean), set_voice_model (auto/smollm2/qwen3_06b/online/custom), get_settings (read the current theme, accent and voice model). Success is reported only when the stored value reads back the same.',
+                parameters: { type: 'OBJECT', properties: { action: { type: 'STRING', description: 'set_theme, set_accent, set_voice_model or get_settings' }, value: { type: 'STRING', description: 'New value for the setting' } }, required: ['action'] }
+            },
+            {
+                name: 'draft_control',
+                description: 'Save, use, list or discard an approved draft (exact saved text, never invented): save (kind + recipient + exact text), use (returns the exact stored text and marks the draft USED), list (pending drafts), discard.',
+                parameters: { type: 'OBJECT', properties: { action: { type: 'STRING', description: 'save, use, list or discard' }, kind: { type: 'STRING', description: 'Draft kind, e.g. WHATSAPP_MESSAGE, for save' }, recipient: { type: 'STRING', description: 'Recipient display name, for save' }, text: { type: 'STRING', description: 'Exact draft text, for save' }, draft_id: { type: 'STRING', description: 'Draft id, for use/discard' } }, required: ['action'] }
             }
         ]
     }
