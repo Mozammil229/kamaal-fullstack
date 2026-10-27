@@ -4,18 +4,24 @@ const PaymentProof = require('../models/PaymentProof');
 const SupportMessage = require('../models/SupportMessage');
 const Transaction = require('../models/Transaction');
 const { modifyCredits } = require('../services/ledgerService');
-const { bumpEarnedAndRetag } = require('../services/socialTagService');
 const { connectToDatabase, isDbConnected } = require('../config/db');
 
 // Get Credits (JWT-authenticated; username from verified token only)
 async function getCredits(req, res) {
     await connectToDatabase();
+    // v91 (BugHunter backend F29): the 503 guard its siblings have.
+    if (!isDbConnected()) {
+        return res.status(503).json({ success: false, error: 'Database offline.' });
+    }
     const username = req.user?.username;
     if (!username) return res.status(401).json({ success: false, error: 'Authentication required.' });
 
     try {
         const user = await User.findOne({ username });
         if (!user) return res.status(404).json({ success: false, error: 'User not found.' });
+        // v91 (BugHunter frontback F2): the ban watchdog polls this endpoint
+        // expecting a 403 for banned users — it never got one.
+        if (user.status === 'banned') return res.status(403).json({ success: false, error: 'Account banned.' });
 
         return res.json({
             success: true,
@@ -49,6 +55,12 @@ async function deductCredit(req, res) {
     if (!Number.isFinite(decAmt) || decAmt <= 0) {
         return res.status(400).json({ success: false, error: 'Amount must be a positive number.' });
     }
+    // v91 (BugHunter backend F7): a non-string `reason` threw TypeError on
+    // `reason?.includes('4K')` AFTER modifyCredits had already deducted —
+    // the 500 made the client retry and double-deduct. Validate first.
+    if (reason !== undefined && reason !== null && typeof reason !== 'string') {
+        return res.status(400).json({ success: false, error: 'Reason must be a string.' });
+    }
 
     try {
         const user = await User.findOne({ username: targetUser });
@@ -63,9 +75,14 @@ async function deductCredit(req, res) {
             adminUser: 'System'
         });
 
-        if (reason?.includes('4K')) updatedUser.stats.videosEnhanced4K += 1;
-        else updatedUser.stats.videosPatched += 1;
-        await updatedUser.save();
+        // v91 (BugHunter backend F7): the stats save used to run as a whole-
+        // doc save AFTER the deduct — a failure there 500d with the credit
+        // already spent. Stats are now a best-effort atomic $inc.
+        try {
+            const statField = (typeof reason === 'string' && reason.includes('4K'))
+                ? 'stats.videosEnhanced4K' : 'stats.videosPatched';
+            await User.updateOne({ username: targetUser }, { $inc: { [statField]: 1 } });
+        } catch (_) { /* stats are non-critical */ }
 
         return res.json({ success: true, remaining: updatedUser.credits, isPro: updatedUser.isPro });
     } catch (e) {
@@ -108,9 +125,41 @@ async function authorizePatch(req, res) {
                 description: 'Credit deducted for video_patch (authorize-patch)',
                 adminUser: 'System'
             });
-            updatedUser.stats.videosPatched += 1;
-            await updatedUser.save();
-            return res.json({ authorized: true, credits: updatedUser.credits, creditsRemaining: updatedUser.credits, isPro: updatedUser.isPro });
+            // v91 (BugHunter backend F7): stats as best-effort atomic $inc,
+            // never a whole-doc save after the money moved.
+            try {
+                await User.updateOne({ username: target }, { $inc: { 'stats.videosPatched': 1 } });
+            } catch (_) { /* stats are non-critical */ }
+            // v91 (BugHunter backend F6): mint the server-side authorization
+            // record that requestRecipe must consume. Without it, any
+            // authenticated user with 0 credits could mint recipes for free.
+            // If the record cannot be created, REFUND the credit — the user
+            // must never lose a credit for an authorization that never existed.
+            const crypto = require('crypto');
+            const PatchAuthorization = require('../models/PatchAuthorization');
+            const authToken = crypto.randomBytes(24).toString('base64url');
+            try {
+                await PatchAuthorization.create({
+                    token: authToken,
+                    username: target,
+                    method: '',
+                    used: false,
+                    expiresAt: new Date(Date.now() + 10 * 60 * 1000)
+                });
+            } catch (authErr) {
+                try {
+                    await modifyCredits({
+                        username: target,
+                        amount: 1,
+                        type: 'admin_grant',
+                        description: 'Refund: patch authorization record could not be created',
+                        adminUser: 'System'
+                    });
+                } catch (_) { /* refund is best-effort; the failure is logged below */ }
+                console.error('[authorize-patch] auth record failed, credit refunded:', authErr.message);
+                return res.status(500).json({ success: false, authorized: false, error: 'Authorization could not be recorded. Credit refunded — please try again.' });
+            }
+            return res.json({ success: true, authorized: true, authToken, credits: updatedUser.credits, creditsRemaining: updatedUser.credits, isPro: updatedUser.isPro });
         } catch (e) {
             if (e.message && e.message.includes('Insufficient credits')) {
                 return res.status(402).json({ authorized: false, error: 'No credits remaining. Please upgrade or redeem voucher.' });
@@ -151,34 +200,74 @@ async function redeemKey(req, res) {
         }
 
         const user = await User.findOne({ username: target });
-        if (!user) return res.status(404).json({ success: false, error: 'User not found.' });
+        if (!user) {
+            // v91 (BugHunter backend F9): the voucher is already claimed — if
+            // the user row is gone, roll the claim back so the key stays usable.
+            await RedeemKey.updateOne({ _id: voucher._id }, { $set: { isUsed: false, usedBy: '', usedAt: null } });
+            return res.status(404).json({ success: false, error: 'User not found.' });
+        }
 
-        user.credits += voucher.credits;
-        // PHASE E: lifetime-earned grows the TAG badge.
-        bumpEarnedAndRetag(user, voucher.credits);
-        user.isPro = voucher.isPro;
-        user.proPlan = voucher.plan;
-        user.tier = voucher.isPro ? 'VIP' : user.tier;
-        user.planExpiry = 'Lifetime';
-        await user.save();
+        // v91 (BugHunter DB P0-1): voucher.plan speaks marketing vocabulary
+        // ('PRO'/'VIP'/'LIFETIME') but User.proPlan is a strict enum — the
+        // old raw assignment threw ValidationError on EVERY default redeem
+        // (500, voucher burned, no credits). Map first, assign second.
+        const { mapPlanToEnum } = require('../services/planService');
+        const { computeSocialTag } = require('../services/socialTagService');
+        const mappedPlan = mapPlanToEnum(voucher.plan);
+        const newEarned = (Number(user.creditsEarned) || 0) + Number(voucher.credits || 0);
 
-        await Transaction.create({
-            username: user.username,
-            type: 'voucher_redeem',
-            creditsChange: voucher.credits,
-            newBalance: user.credits,
-            plan: voucher.plan,
-            planExpiry: user.planExpiry,
-            description: `Redeemed VIP Voucher: ${cleanKey}`,
-            adminUser: 'Voucher Engine'
-        });
+        // v91 (BugHunter backend F9 / DB P1-6): the grant is ONE atomic
+        // update ($inc credits/earned + $set plan fields) — the old
+        // read-modify-write save() could lose increments and failed AFTER
+        // the irreversible claim. On grant failure the claim is rolled back.
+        let updated;
+        try {
+            updated = await User.findOneAndUpdate(
+                { username: target },
+                {
+                    $inc: { credits: Number(voucher.credits || 0), creditsEarned: Number(voucher.credits || 0) },
+                    $set: {
+                        isPro: voucher.isPro,
+                        proPlan: mappedPlan,
+                        tier: voucher.isPro ? 'VIP' : user.tier,
+                        planExpiry: 'Lifetime',
+                        tag: computeSocialTag(newEarned)
+                    }
+                },
+                { new: true }
+            );
+        } catch (grantErr) {
+            await RedeemKey.updateOne({ _id: voucher._id }, { $set: { isUsed: false, usedBy: '', usedAt: null } });
+            throw grantErr;
+        }
+        if (!updated) {
+            await RedeemKey.updateOne({ _id: voucher._id }, { $set: { isUsed: false, usedBy: '', usedAt: null } });
+            return res.status(404).json({ success: false, error: 'User not found.' });
+        }
+
+        // Audit row is best-effort: the grant already landed; a ledger
+        // failure must not 500 the redemption (BugHunter backend F7).
+        try {
+            await Transaction.create({
+                username: updated.username,
+                type: 'voucher_redeem',
+                creditsChange: voucher.credits,
+                newBalance: updated.credits,
+                plan: mappedPlan,
+                planExpiry: updated.planExpiry,
+                description: `Redeemed VIP Voucher: ${cleanKey}`,
+                adminUser: 'Voucher Engine'
+            });
+        } catch (e) {
+            console.error('[redeem] audit row failed after grant:', e.message);
+        }
 
         return res.json({
             success: true,
-            message: `Success! Granted ${voucher.credits} credits & ${voucher.plan} VIP Plan.`,
-            credits: user.credits,
-            isPro: user.isPro,
-            plan: user.proPlan
+            message: `Success! Granted ${voucher.credits} credits & ${mappedPlan} VIP Plan.`,
+            credits: updated.credits,
+            isPro: updated.isPro,
+            plan: updated.proPlan
         });
     } catch (e) {
         return res.status(500).json({ success: false, error: e.message });
@@ -192,6 +281,10 @@ async function redeemKey(req, res) {
 const PLAN_CREDITS = { PRO: 500, VIP: 5000, LIFETIME: 9999999 };
 async function submitPaymentProof(req, res) {
     await connectToDatabase();
+    // v91 (BugHunter backend F22): the 503 guard its siblings have.
+    if (!isDbConnected()) {
+        return res.status(503).json({ success: false, error: 'Database offline.' });
+    }
     const { method, transactionId, amount, requestedPlan, screenshotUrl } = req.body;
     // SECURITY FIX: username from verified JWT only.
     const target = req.user?.username;
@@ -199,6 +292,14 @@ async function submitPaymentProof(req, res) {
     if (!transactionId) {
         return res.status(400).json({ success: false, error: 'Username and Transaction ID are required.' });
     }
+    // v91 (BugHunter DB P1-14): method is an enum — 'JazzCash'/'card' used to
+    // 500 on Mongoose validation. Normalise + validate up front (400, not 500).
+    const cleanMethod = String(method || 'jazzcash').trim().toLowerCase();
+    if (!['jazzcash', 'easypaisa', 'bank'].includes(cleanMethod)) {
+        return res.status(400).json({ success: false, error: 'Payment method must be jazzcash, easypaisa or bank.' });
+    }
+    // v91 (BugHunter backend F22): screenshotUrl was uncapped.
+    const cleanScreenshot = String(screenshotUrl || '').slice(0, 2048);
 
     try {
         // BH-5 FIX: reject replayed transaction IDs (same TxID submitted twice).
@@ -212,16 +313,27 @@ async function submitPaymentProof(req, res) {
             });
         }
         const plan = String(requestedPlan || 'PRO').toUpperCase();
-        const proof = await PaymentProof.create({
-            username: target.trim(),
-            method: method || 'jazzcash',
-            transactionId: txid,
-            amount: Number(amount) || 500,
-            requestedPlan: plan,
-            requestedCredits: PLAN_CREDITS[plan] || PLAN_CREDITS.PRO,
-            screenshotUrl: screenshotUrl || '',
-            status: 'pending'
-        });
+        let proof;
+        try {
+            proof = await PaymentProof.create({
+                username: target.trim(),
+                method: cleanMethod,
+                transactionId: txid,
+                amount: Number(amount) || 500,
+                requestedPlan: plan,
+                requestedCredits: PLAN_CREDITS[plan] || PLAN_CREDITS.PRO,
+                screenshotUrl: cleanScreenshot,
+                status: 'pending'
+            });
+        } catch (createErr) {
+            // v91 (BugHunter DB P1-8): the pre-check + create race — a
+            // concurrent duplicate hits the unique index as E11000. That is
+            // a 409 (already submitted), never a 500.
+            if (createErr && createErr.code === 11000) {
+                return res.status(409).json({ success: false, error: 'This transaction ID was already submitted.' });
+            }
+            throw createErr;
+        }
 
         await SupportMessage.create({
             sender: '👑 Owner Desk',

@@ -8,7 +8,9 @@ const { connectToDatabase } = require('../config/db');
 async function getChatMessages(req, res) {
     await connectToDatabase();
     const channel = req.query.channel || 'global';
-    const limit = parseInt(req.query.limit) || 75;
+    // v91 (BugHunter backend F17): the limit was uncapped — ?limit=1000000
+    // returned a huge payload. Clamp to 200.
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit) || 75));
 
     try {
         let filter = {};
@@ -60,6 +62,9 @@ async function sendChatMessage(req, res) {
     if (!username) return res.status(401).json({ success: false, error: 'Authentication required.' });
     const { recipient, text, channel } = req.body;
     if (!text) return res.status(400).json({ success: false, error: 'Text required.' });
+    // v91 (BugHunter backend F18): messages were stored unbounded (up to the
+    // 15MB body limit). Cap at 4000 chars.
+    if (String(text).length > 4000) return res.status(400).json({ success: false, error: 'Message is too long (max 4000 characters).' });
 
     const cleanSender = String(username).trim();
     const cleanText = String(text).trim();
@@ -96,20 +101,34 @@ async function reactChatMessage(req, res) {
     const username = req.user?.username;
     if (!username) return res.status(401).json({ success: false, error: 'Authentication required.' });
     if (!messageId || !emoji) return res.status(400).json({ success: false, error: 'Message ID and emoji required.' });
+    // v91 (BugHunter backend F18): emoji was stored unbounded. One emoji only.
+    const cleanEmoji = String(emoji).trim();
+    if (cleanEmoji.length === 0 || cleanEmoji.length > 16 || cleanEmoji.includes('.') || cleanEmoji.includes('$')) {
+        return res.status(400).json({ success: false, error: 'Invalid emoji.' });
+    }
 
     try {
         const msg = await ChatMessage.findById(messageId);
         if (!msg) return res.status(404).json({ success: false, error: 'Message not found.' });
 
-        const current = msg.reactions?.get(emoji) || [];
-        if (current.includes(username)) {
-            msg.reactions.set(emoji, current.filter(u => u !== username));
-        } else {
-            current.push(username);
-            msg.reactions.set(emoji, current);
+        // v91 (BugHunter DB P2-19): the old read-modify-save race lost
+        // concurrent reacts. Toggle atomically: add if absent, pull if present.
+        const path = `reactions.${cleanEmoji}`;
+        const added = await ChatMessage.findOneAndUpdate(
+            { _id: messageId, [path]: { $ne: username } },
+            { $addToSet: { [path]: username } },
+            { new: true }
+        );
+        let updated = added;
+        if (!added) {
+            updated = await ChatMessage.findOneAndUpdate(
+                { _id: messageId },
+                { $pull: { [path]: username } },
+                { new: true }
+            );
         }
-        await msg.save();
-        return res.json({ success: true, reactions: msg.reactions });
+        if (!updated) return res.status(404).json({ success: false, error: 'Message not found.' });
+        return res.json({ success: true, reactions: updated.reactions });
     } catch (e) {
         return res.status(500).json({ success: false, error: e.message });
     }
@@ -120,16 +139,28 @@ async function reactChatMessage(req, res) {
 async function getSupportMessages(req, res) {
     await connectToDatabase();
     const username = req.user?.username || '';
-    const deviceId = req.query.deviceId || '';
 
     try {
-        const raw = await SupportMessage.find({
-            $or: [
-                { sender: username },
-                { deviceId: deviceId },
-                { isAdmin: true }
-            ]
-        }).sort({ timestamp: -1 }).limit(50).lean();
+        // v91 (BugHunter backend F5/F23): the old filter had a bare
+        // `{ isAdmin: true }` clause — EVERY admin message (payment-proof
+        // confirmations with TxIDs, every admin DM) was readable by ANY
+        // logged-in user, and `?deviceId=<victim>` read that device's thread.
+        // Now: only the caller's own messages, DMs addressed to them
+        // (recipientUsername, plus legacy rows where deviceId holds the
+        // username), their own device's thread, and global broadcasts.
+        const me = await User.findOne({ username }).select('deviceId').lean();
+        const myDevice = me?.deviceId || '';
+        const or = [
+            { sender: username },
+            { recipientUsername: username },
+            { broadcast: true }
+        ];
+        if (myDevice) or.push({ deviceId: myDevice });
+        // Legacy admin-DM rows stored the recipient username in deviceId —
+        // match them only when they are admin messages, so a client cannot
+        // inject into another user's thread via a crafted deviceId.
+        or.push({ deviceId: username, isAdmin: true });
+        const raw = await SupportMessage.find({ $or: or }).sort({ timestamp: -1 }).limit(50).lean();
 
         const messages = raw.reverse().map(m => ({
             id: m._id.toString(),
@@ -151,6 +182,7 @@ async function sendSupportMessage(req, res) {
     const { deviceId, message } = req.body;
     const sender = req.user?.username || 'User';
     if (!message) return res.status(400).json({ success: false, error: 'Message required.' });
+    if (String(message).length > 4000) return res.status(400).json({ success: false, error: 'Message is too long (max 4000 characters).' });
 
     try {
         const msg = await SupportMessage.create({
@@ -160,7 +192,19 @@ async function sendSupportMessage(req, res) {
             isAdmin: false,
             timestamp: Date.now()
         });
-        return res.json({ success: true, message: 'Sent to Owner Desk', id: msg._id });
+        // v91 (BugHunter frontback F4): the old response
+        // `{success, message:'Sent to Owner Desk', id}` could never parse as
+        // the app's SupportMessageDto (non-null `sender` missing) — every
+        // send threw inside Moshi and was masked by a fabricated local
+        // success. Return the full DTO-shaped object with the real id.
+        return res.json({
+            success: true,
+            id: msg._id,
+            sender: msg.sender,
+            message: msg.message,
+            isAdmin: false,
+            timestamp: msg.timestamp
+        });
     } catch (e) {
         return res.status(500).json({ success: false, error: e.message });
     }
@@ -193,17 +237,28 @@ async function votePoll(req, res) {
         const poll = await Poll.findById(pollId);
         if (!poll) return res.status(404).json({ success: false, error: 'Poll not found.' });
 
-        const hasVoted = poll.voters.some(v => v.username === username);
-        if (hasVoted) {
-            return res.status(400).json({ success: false, error: 'You have already voted in this poll.' });
+        // v91 (BugHunter backend F19 / DB P2-18): optionIndex was unvalidated
+        // (out-of-range recorded a voter with no vote counted; non-numeric
+        // 500d) and the has-voted check + push was read-modify-write.
+        const idx = Number(optionIndex);
+        if (!Number.isInteger(idx) || idx < 0 || idx >= (poll.options?.length || 0)) {
+            return res.status(400).json({ success: false, error: 'Invalid poll option.' });
         }
 
-        poll.voters.push({ username, optionIndex });
-        if (poll.options[optionIndex]) {
-            poll.options[optionIndex].votes = (poll.options[optionIndex].votes || 0) + 1;
+        // Atomic voter claim + vote increment: a concurrent second vote for
+        // the same user cannot pass the 'voters.username: $ne' guard.
+        const updated = await Poll.findOneAndUpdate(
+            { _id: pollId, 'voters.username': { $ne: username } },
+            {
+                $push: { voters: { username, optionIndex: idx } },
+                $inc: { [`options.${idx}.votes`]: 1 }
+            },
+            { new: true }
+        );
+        if (!updated) {
+            return res.status(400).json({ success: false, error: 'You have already voted in this poll.' });
         }
-        await poll.save();
-        return res.json({ success: true, poll });
+        return res.json({ success: true, poll: updated });
     } catch (e) {
         return res.status(500).json({ success: false, error: e.message });
     }

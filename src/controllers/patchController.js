@@ -42,14 +42,31 @@ async function requestRecipe(req, res) {
     const username = req.user?.username;
     if (!username) return res.status(401).json({ success: false, error: 'Authentication required.' });
 
-    const { method, devicePubkeyPem, deviceId, subMode } = req.body || {};
+    const { method, devicePubkeyPem, deviceId, subMode, authToken } = req.body || {};
     const recipe = getRecipe(method);
     if (!recipe) {
         return res.status(400).json({ success: false, error: 'Unknown patch method. Use "normal", "pro", "method3", "method4" or "method5".' });
     }
-    // v90 Method 4: the client's TikTok/Instagram toggle is echoed into the
-    // recipe (server-validated; anything else is a 400). Only method4 uses it.
-    if (recipe.method === 'method4' && subMode !== undefined) {
+    // v91 (BugHunter backend F6): a recipe is issued ONLY against a
+    // server-side authorization record created by /api/authorize-patch (1
+    // credit deducted there). The record is consumed atomically here — a
+    // client that skips authorize can no longer patch for free.
+    if (!authToken || typeof authToken !== 'string') {
+        return res.status(400).json({ success: false, error: 'Patch authorization required. Call /api/authorize-patch first.' });
+    }
+    const PatchAuthorization = require('../models/PatchAuthorization');
+    const authRecord = await PatchAuthorization.findOneAndUpdate(
+        { token: authToken.trim(), username, used: false, expiresAt: { $gt: new Date() } },
+        { $set: { used: true, method: recipe.method } },
+        { new: true }
+    );
+    if (!authRecord) {
+        return res.status(400).json({ success: false, error: 'Patch authorization missing, already used, or expired. Call /api/authorize-patch first.' });
+    }
+    // v91 (BugHunter frontback F15): Moshi serializes an explicit JSON null,
+    // and `subMode !== undefined` let null through as "provided" (400 for
+    // Method 4). Null is now treated as absent, like undefined.
+    if (recipe.method === 'method4' && subMode != null) {
         if (subMode !== 'tiktok' && subMode !== 'instagram') {
             return res.status(400).json({ success: false, error: 'Invalid subMode. Use "tiktok" or "instagram".' });
         }
@@ -87,8 +104,8 @@ async function requestRecipe(req, res) {
             });
         }
         if (!user.deviceId && cleanDevice) {
-            user.deviceId = cleanDevice;
-            await user.save();
+            // v91 (BugHunter DB P1-13): targeted $set, not whole-doc save().
+            await User.updateOne({ _id: user._id }, { $set: { deviceId: cleanDevice } });
         }
 
         const recipeId = crypto.randomUUID();

@@ -109,6 +109,60 @@ function parseExtractionJson(text) {
  * sent; fully wrapped — it must never throw into the chat path.
  * Returns true only when a DB write actually happened.
  */
+/**
+ * Apply one extraction pass to a memory doc (in memory only — caller saves).
+ * Returns true when the doc changed. Shared by the first attempt and the
+ * optimistic-concurrency retry so both apply identical merge rules.
+ */
+function applyEntries(doc, entries) {
+    let changed = false;
+    let applied = 0;
+    for (const e of entries) {
+        if (applied >= MAX_FACTS_PER_TURN) break;
+        if (!e || typeof e !== 'object') continue;
+
+        // Forget request: {"forget": "key"} (or {category, key}).
+        const forgetKey = typeof e.forget === 'string'
+            ? e.forget
+            : (e.forget && typeof e.forget === 'object' ? e.forget.key : null);
+        if (forgetKey) {
+            const k = String(forgetKey).trim().toLowerCase();
+            const before = doc.facts.length;
+            doc.facts = doc.facts.filter(f => String(f.key).toLowerCase() !== k);
+            if (doc.facts.length !== before) { changed = true; applied += 1; }
+            continue;
+        }
+
+        const key = String(e.key || '').trim().slice(0, 80);
+        const value = String(e.value || '').trim().slice(0, 500);
+        if (!key || !value) continue;
+        const category = CATEGORIES.includes(String(e.category)) ? String(e.category) : 'other';
+        const kind = e.kind === 'preference' ? 'preference' : 'confirmed';
+
+        // Correction wins: same category+key -> replace, never duplicate.
+        const idx = doc.facts.findIndex(f =>
+            f.category === category && String(f.key).toLowerCase() === key.toLowerCase());
+        const enc = memoryCrypto.encryptValue(value);
+        if (idx >= 0) {
+            doc.facts[idx].valueEnc = enc;
+            doc.facts[idx].kind = kind;
+            doc.facts[idx].source = 'chat';
+            doc.facts[idx].updatedAt = new Date();
+        } else {
+            doc.facts.push({ category, key, valueEnc: enc, kind, source: 'chat', updatedAt: new Date() });
+        }
+        changed = true;
+        applied += 1;
+    }
+    // Cap: keep the most recently updated MAX_FACTS.
+    if (doc.facts.length > MAX_FACTS) {
+        doc.facts = [...doc.facts]
+            .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
+            .slice(0, MAX_FACTS);
+    }
+    return changed;
+}
+
 async function extractAndSave({ username, userMessage, assistantReply, userGeminiKey }) {
     try {
         if (!username || !userMessage) return false;
@@ -129,57 +183,24 @@ async function extractAndSave({ username, userMessage, assistantReply, userGemin
         if (!entries || entries.length === 0) return false;
 
         const doc = existing || new UserMemory({ username, enabled: true, facts: [] });
-        let changed = false;
-        let applied = 0;
-
-        for (const e of entries) {
-            if (applied >= MAX_FACTS_PER_TURN) break;
-            if (!e || typeof e !== 'object') continue;
-
-            // Forget request: {"forget": "key"} (or {category, key}).
-            const forgetKey = typeof e.forget === 'string'
-                ? e.forget
-                : (e.forget && typeof e.forget === 'object' ? e.forget.key : null);
-            if (forgetKey) {
-                const k = String(forgetKey).trim().toLowerCase();
-                const before = doc.facts.length;
-                doc.facts = doc.facts.filter(f => String(f.key).toLowerCase() !== k);
-                if (doc.facts.length !== before) { changed = true; applied += 1; }
-                continue;
-            }
-
-            const key = String(e.key || '').trim().slice(0, 80);
-            const value = String(e.value || '').trim().slice(0, 500);
-            if (!key || !value) continue;
-            const category = CATEGORIES.includes(String(e.category)) ? String(e.category) : 'other';
-            const kind = e.kind === 'preference' ? 'preference' : 'confirmed';
-
-            // Correction wins: same category+key -> replace, never duplicate.
-            const idx = doc.facts.findIndex(f =>
-                f.category === category && String(f.key).toLowerCase() === key.toLowerCase());
-            const enc = memoryCrypto.encryptValue(value);
-            if (idx >= 0) {
-                doc.facts[idx].valueEnc = enc;
-                doc.facts[idx].kind = kind;
-                doc.facts[idx].source = 'chat';
-                doc.facts[idx].updatedAt = new Date();
-            } else {
-                doc.facts.push({ category, key, valueEnc: enc, kind, source: 'chat', updatedAt: new Date() });
-            }
-            changed = true;
-            applied += 1;
-        }
-
-        if (!changed) return false;
-
-        // Cap: keep the most recently updated MAX_FACTS.
-        if (doc.facts.length > MAX_FACTS) {
-            doc.facts = [...doc.facts]
-                .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
-                .slice(0, MAX_FACTS);
-        }
+        if (!applyEntries(doc, entries)) return false;
         doc.updatedAt = new Date();
-        await doc.save();
+        try {
+            await doc.save();
+        } catch (saveErr) {
+            // v91 (BugHunter DB P2-17): optimistic-concurrency retry — a
+            // concurrent save bumped __v; reload fresh and re-apply the same
+            // entries once instead of silently overwriting the other save.
+            if (saveErr && saveErr.name === 'VersionError') {
+                const fresh = await loadMemory(username);
+                if (!fresh || !memoryEnabled(fresh)) return false;
+                if (!applyEntries(fresh, entries)) return false;
+                fresh.updatedAt = new Date();
+                await fresh.save();
+            } else {
+                throw saveErr;
+            }
+        }
         return true;
     } catch (_) {
         return false; // fail-soft: an unsaved fact is simply not remembered

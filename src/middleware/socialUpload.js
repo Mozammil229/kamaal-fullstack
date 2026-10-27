@@ -11,15 +11,18 @@
 // - Voice: accepted as-is after the type check (no trivial transcode available
 //   in this stack; bytes are type-verified).
 // - Randomized filenames: crypto.randomUUID() + server-validated extension.
-// - Writes go to public/uploads/social/ (served by express.static in app.js).
+// - Writes go to Vercel Blob (public object storage; token from env only).
+//   Without BLOB_READ_WRITE_TOKEN the upload answers 503, never a disk error.
 // - Auth is enforced at the route layer (authenticateUser on every endpoint);
 //   the 30/hr write rate limit is enforced in socialController.
+// v91 (BugHunter backend F1): Vercel serverless functions have a READ-ONLY
+// filesystem except /tmp — the old write to public/uploads/social/ threw
+// EROFS on every upload. Files now go to Vercel Blob (object storage).
+// Token comes ONLY from env BLOB_READ_WRITE_TOKEN (Vercel dashboard; the
+// user creates the Blob store there). Without a token the endpoint answers
+// a clear 503 instead of a fake 400 — uploads are "not configured", not broken.
 const crypto = require('crypto');
-const fs = require('fs');
-const path = require('path');
 const multer = require('multer');
-
-const UPLOAD_DIR = path.join(__dirname, '..', '..', 'public', 'uploads', 'social');
 const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
 const MAX_VOICE_BYTES = 2 * 1024 * 1024;
 
@@ -32,13 +35,32 @@ const upload = multer({
 });
 
 function ensureUploadDir() {
-    fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+    // v91: no local upload dir any more (Vercel Blob, see processUpload).
+    // Kept as a no-op so older call sites do not break if referenced.
 }
 
 // ---- magic-byte classification -------------------------------------------
 // Returns 'jpg' | 'png' | 'webp' | 'm4a' | 'opus' | null.
 // Inspects raw bytes only. Offset-4 'ftyp' box = MP4-family container
 // (m4a voice notes from MediaRecorder AAC/MPEG_4). 'OggS' = Ogg/Opus.
+// v91 (BugHunter backend F27): the old check accepted ANY MP4 as a voice
+// note (a video file passed as m4a). Now the ftyp major brand is checked:
+// audio brands pass; known video brands fail; ambiguous 'mp42' is accepted
+// only when no 'vide' handler track is present in the file.
+function hasVideoTrack(buf) {
+    // Scan for 'hdlr' boxes; the handler type sits 8 bytes after 'hdlr'.
+    const needle = Buffer.from('hdlr', 'ascii');
+    let at = 0;
+    while (true) {
+        const idx = buf.indexOf(needle, at);
+        if (idx < 0 || idx + 12 > buf.length) return false;
+        if (buf.toString('ascii', idx + 8, idx + 12) === 'vide') return true;
+        at = idx + 4;
+    }
+}
+
+const VIDEO_FTYP_BRANDS = new Set(['isom', 'iso2', 'iso3', 'iso4', 'iso5', 'iso6', 'avc1', 'mp41', 'dash', 'M4V ', '3gp4', '3gp5', '3gp6']);
+
 function classifyByMagicBytes(buf) {
     if (!Buffer.isBuffer(buf) || buf.length < 12) return null;
     const b = buf;
@@ -47,7 +69,12 @@ function classifyByMagicBytes(buf) {
         b[4] === 0x0d && b[5] === 0x0a && b[6] === 0x1a && b[7] === 0x0a) return 'png';
     if (b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 && // 'RIFF'
         b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50) return 'webp'; // 'WEBP'
-    if (b[4] === 0x66 && b[5] === 0x74 && b[6] === 0x79 && b[7] === 0x70) return 'm4a'; // 'ftyp'
+    if (b[4] === 0x66 && b[5] === 0x74 && b[6] === 0x79 && b[7] === 0x70) { // 'ftyp'
+        const brand = b.toString('ascii', 8, 12);
+        if (VIDEO_FTYP_BRANDS.has(brand)) return null;
+        if (brand === 'mp42' && hasVideoTrack(b)) return null;
+        return 'm4a';
+    }
     if (b[0] === 0x4f && b[1] === 0x67 && b[2] === 0x67 && b[3] === 0x53) return 'opus'; // 'OggS'
     return null;
 }
@@ -88,13 +115,24 @@ async function processUpload(file, kind) {
     }
     // Voice: accepted as-is after the magic-byte type check (E4 spec).
 
-    ensureUploadDir();
-    const filename = `${crypto.randomUUID()}.${ext}`;
-    const fullPath = path.join(UPLOAD_DIR, filename);
-    // filename is 100% server-generated (randomUUID + validated ext) — no
-    // path traversal possible.
-    await fs.promises.writeFile(fullPath, bytes);
-    return { url: `/uploads/social/${filename}`, ext };
+    // v91 (BugHunter backend F1): persist to Vercel Blob, never the local
+    // disk (read-only on Vercel). Token from env only; without it the caller
+    // gets a 503 with a human message instead of an EROFS 400.
+    const blobToken = process.env.BLOB_READ_WRITE_TOKEN;
+    if (!blobToken) {
+        const err = new Error('Uploads are not configured on the server yet. Please try again later.');
+        err.status = 503;
+        throw err;
+    }
+    const { put } = require('@vercel/blob');
+    const filename = `social/${crypto.randomUUID()}.${ext}`;
+    const contentType = ext === 'jpg' ? 'image/jpeg'
+        : ext === 'png' ? 'image/png'
+        : ext === 'webp' ? 'image/webp'
+        : ext === 'opus' ? 'audio/ogg'
+        : 'audio/mp4';
+    const blob = await put(filename, bytes, { access: 'public', contentType, token: blobToken });
+    return { url: blob.url, ext };
 }
 
 module.exports = {

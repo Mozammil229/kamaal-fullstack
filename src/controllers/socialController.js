@@ -10,6 +10,7 @@
 // - Stories: server filters expired rows on every read.
 // - Media filenames are server-randomized; client filename/MIME never trusted.
 const crypto = require('crypto');
+const mongoose = require('mongoose');
 const { connectToDatabase } = require('../config/db');
 const User = require('../models/User');
 const ChatThread = require('../models/ChatThread');
@@ -51,6 +52,27 @@ function writeRateLimited(username) {
 function authedUsername(req) {
     const u = req.user && req.user.username;
     return typeof u === 'string' ? u.trim() : '';
+}
+
+// v91 (BugHunter backend F20): an invalid ObjectId in :id / :messageId used
+// to throw a Mongoose CastError inside the handler — an unhandled rejection
+// in an async route (no global error handler) that killed the serverless
+// invocation with no JSON body. Validate up front; bad ids are a 400.
+function validObjectId(value) {
+    return typeof value === 'string' && mongoose.Types.ObjectId.isValid(value);
+}
+function badId(res) {
+    return res.status(400).json({ success: false, error: 'Invalid id.' });
+}
+
+// v91 (BugHunter backend F20): async-handler wrapper — any uncaught throw
+// inside a social handler becomes a 500 JSON response instead of an
+// unhandled rejection that crashes the serverless invocation.
+function wrap(fn) {
+    return (req, res, next) => Promise.resolve(fn(req, res, next)).catch((e) => {
+        console.error('[Social]', fn.name, e && e.message);
+        if (!res.headersSent) res.status(500).json({ success: false, error: 'Server error.' });
+    });
 }
 
 // username -> { tag } for a set of usernames (single query, no N+1).
@@ -279,6 +301,7 @@ async function getMessages(req, res) {
     await connectToDatabase();
     const me = authedUsername(req);
     if (!me) return res.status(401).json({ success: false, error: 'Authentication required.' });
+    if (!validObjectId(req.params.id)) return badId(res);
     const thread = await ChatThread.findById(req.params.id).lean();
     if (!thread || !(thread.memberUsernames || []).includes(me)) {
         return res.status(404).json({ success: false, error: 'Chat not found.' });
@@ -317,6 +340,7 @@ async function sendMessage(req, res) {
     if (writeRateLimited(me)) {
         return res.status(429).json({ success: false, error: 'You are sending too quickly. Please wait a bit and try again.' });
     }
+    if (!validObjectId(req.params.id)) return badId(res);
     const thread = await ChatThread.findById(req.params.id);
     if (!thread || !(thread.memberUsernames || []).includes(me)) {
         return res.status(404).json({ success: false, error: 'Chat not found.' });
@@ -334,8 +358,13 @@ async function sendMessage(req, res) {
         }
     }
     const kind = String((req.body && req.body.kind) || 'text');
-    if (!['text', 'photo', 'voice', 'document'].includes(kind)) {
-        return res.status(400).json({ success: false, error: 'kind must be text, photo, voice, or document.' });
+    // v91 (BugHunter backend F20): 'document' removed from the allowlist —
+    // the app has no document-sending UI and processUpload has no document
+    // branch, so a 'document' message would carry an empty mediaUrl and a
+    // caller-supplied fileName with no stored file. Stored documents (old
+    // rows) still read fine; new sends are text/photo/voice only.
+    if (!['text', 'photo', 'voice'].includes(kind)) {
+        return res.status(400).json({ success: false, error: 'kind must be text, photo, or voice.' });
     }
     let mediaUrl = '';
     let durationSec = 0;
@@ -353,12 +382,6 @@ async function sendMessage(req, res) {
         }
         if (kind === 'voice') {
             durationSec = Math.max(0, Math.min(600, parseInt((req.body && req.body.durationSec) || '0', 10) || 0));
-        }
-        if (kind === 'document' && req.file) {
-            // Server-stored raw bytes win for size; the name is display-only
-            // metadata, reduced to a basename, never trusted as a path.
-            fileName = String(req.file.originalname || 'file').split(/[\\/]/).pop().slice(0, 120);
-            fileSize = Math.max(0, req.file.size || 0);
         }
     }
     // PHASE 1 — reply target must exist in THIS thread and not be deleted.
@@ -398,8 +421,9 @@ async function sendMessage(req, res) {
         console.error('[Social] sendMessage create failed', dupErr && dupErr.message);
         return res.status(500).json({ success: false, error: 'Could not send message.' });
     }
-    thread.lastMessageAt = msg.createdAt;
-    await thread.save();
+    // v91 (BugHunter backend F20): $max — a slow older message must never
+    // drag lastMessageAt backwards over a newer message's stamp.
+    await ChatThread.updateOne({ _id: thread._id }, { $max: { lastMessageAt: msg.createdAt } });
     const tags = await tagMapFor([me]);
     res.json({
         success: true,
@@ -417,6 +441,7 @@ async function updateGroupMembers(req, res) {
     if (writeRateLimited(me)) {
         return res.status(429).json({ success: false, error: 'You are sending too quickly. Please wait a bit and try again.' });
     }
+    if (!validObjectId(req.params.id)) return badId(res);
     const thread = await ChatThread.findById(req.params.id);
     if (!thread || thread.type !== 'group') {
         return res.status(404).json({ success: false, error: 'Group not found.' });
@@ -478,6 +503,7 @@ async function updateGroupMembers(req, res) {
 async function loadMemberThread(req, res) {
     const me = authedUsername(req);
     if (!me) { res.status(401).json({ success: false, error: 'Authentication required.' }); return null; }
+    if (!validObjectId(req.params.id)) { badId(res); return null; }
     const thread = await ChatThread.findById(req.params.id);
     if (!thread || !(thread.memberUsernames || []).includes(me)) {
         res.status(404).json({ success: false, error: 'Chat not found.' });
@@ -803,6 +829,7 @@ async function updateContact(req, res) {
     await connectToDatabase();
     const me = authedUsername(req);
     if (!me) return res.status(401).json({ success: false, error: 'Authentication required.' });
+    if (!validObjectId(req.params.id)) return badId(res);
     const contact = await SocialContact.findOne({ _id: req.params.id, ownerUsername: me });
     if (!contact) return res.status(404).json({ success: false, error: 'Contact not found.' });
     if (req.body && req.body.customName !== undefined) {
@@ -836,23 +863,23 @@ async function saveFcmToken(req, res) {
 }
 
 module.exports = {
-    listThreads,
-    createThread,
-    getMessages,
-    sendMessage,
-    markThreadRead,
-    editMessage,
-    deleteMessage,
-    reactMessage,
-    searchInThread,
-    searchGlobal,
-    updateGroupMembers,
-    getFeed,
-    createPost,
-    createStory,
-    getStoriesFeed,
-    listContacts,
-    addContact,
-    updateContact,
-    saveFcmToken
+    listThreads: wrap(listThreads),
+    createThread: wrap(createThread),
+    getMessages: wrap(getMessages),
+    sendMessage: wrap(sendMessage),
+    markThreadRead: wrap(markThreadRead),
+    editMessage: wrap(editMessage),
+    deleteMessage: wrap(deleteMessage),
+    reactMessage: wrap(reactMessage),
+    searchInThread: wrap(searchInThread),
+    searchGlobal: wrap(searchGlobal),
+    updateGroupMembers: wrap(updateGroupMembers),
+    getFeed: wrap(getFeed),
+    createPost: wrap(createPost),
+    createStory: wrap(createStory),
+    getStoriesFeed: wrap(getStoriesFeed),
+    listContacts: wrap(listContacts),
+    addContact: wrap(addContact),
+    updateContact: wrap(updateContact),
+    saveFcmToken: wrap(saveFcmToken)
 };

@@ -23,7 +23,12 @@ async function isTokenRevoked(token) {
                 return true;
             }
         } catch (e) {
-            console.warn('Revoked token check error:', e.message);
+            // v91 (BugHunter backend F26): fail CLOSED when the DB is up but
+            // the revocation lookup itself errors — a logged-out token must
+            // not slip through on a transient query failure. When the DB is
+            // down entirely the in-memory set above is the only check.
+            console.warn('Revoked token check error (failing closed):', e.message);
+            return true;
         }
     }
     return false;
@@ -62,6 +67,22 @@ async function authenticateUser(req, res, next) {
     try {
         const decoded = jwt.verify(token, env.JWT_SECRET);
         req.user = decoded;
+        // v91 (BugHunter backend F11): banned users kept nearly full API
+        // access because only a few handlers checked status. The check now
+        // lives here, once, for every JWT route. A DB-lookup failure fails
+        // OPEN (the DB is required by the handlers anyway — they 503 without
+        // it) so a transient blip cannot lock out every user.
+        if (decoded && decoded.username) {
+            try {
+                const User = require('../models/User');
+                const u = await User.findOne({ username: decoded.username }).select('status').lean();
+                if (u && u.status === 'banned') {
+                    return res.status(403).json({ success: false, error: 'Account banned.' });
+                }
+            } catch (e) {
+                console.warn('Banned check lookup failed (failing open):', e.message);
+            }
+        }
         next();
     } catch (err) {
         return res.status(401).json({ success: false, error: 'Invalid or expired token.' });

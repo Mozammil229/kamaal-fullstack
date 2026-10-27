@@ -54,16 +54,18 @@ async function deleteFact(req, res) {
     try {
         const username = await guard(req, res);
         if (!username) return;
-        const doc = await memoryService.loadMemory(username);
-        if (!doc) return res.json({ success: true, removed: false });
-        const before = doc.facts.length;
-        doc.facts = doc.facts.filter(f => String(f._id) !== String(req.params.factId));
-        const removed = doc.facts.length !== before;
-        if (removed) {
-            doc.updatedAt = new Date();
-            await doc.save();
+        // v91 (BugHunter backend F29, same class): a malformed factId used
+        // to silently match nothing (200 removed:false) — validate so a
+        // typo'd id is a clear 400, and delete atomically with $pull.
+        const mongoose = require('mongoose');
+        if (!mongoose.Types.ObjectId.isValid(String(req.params.factId || ''))) {
+            return res.status(400).json({ success: false, error: 'Invalid fact id.' });
         }
-        return res.json({ success: true, removed });
+        const result = await UserMemory.updateOne(
+            { username, 'facts._id': req.params.factId },
+            { $pull: { facts: { _id: req.params.factId } }, $set: { updatedAt: new Date() } }
+        );
+        return res.json({ success: true, removed: result.modifiedCount > 0 });
     } catch (e) {
         return res.status(500).json({ success: false, error: e.message });
     }

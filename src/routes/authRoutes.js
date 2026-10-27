@@ -2,6 +2,11 @@ const express = require('express');
 const router = express.Router();
 const authController = require('../controllers/authController');
 const { authenticateUser } = require('../middleware/auth');
+const { rateLimit } = require('../middleware/rateLimit');
+
+// v91 (BugHunter backend F27): registration was unthrottled — mass account
+// creation for referral farming / quota abuse. 5 registrations/min per IP.
+const registerRateLimit = rateLimit({ windowMs: 60 * 1000, max: 5, message: 'Too many registrations. Try again in a minute.' });
 
 // SECURITY FIX (#9): simple per-IP login throttle (best-effort in-memory;
 // Vercel serverless instances each keep their own bucket).
@@ -22,8 +27,11 @@ function loginRateLimit(req, res, next) {
     next();
 }
 
-router.post('/register', authController.register);
+router.post('/register', registerRateLimit, authController.register);
 router.post('/login', loginRateLimit, authController.login);
+// v91 (BugHunter frontback F7): the app never called logout — the token
+// stayed valid after the user "logged out". The app now calls this on logout.
+router.post('/logout', authenticateUser, authController.userLogout);
 // PHASE F — transport encryption: public RSA key for opportunistic
 // password encryption (public route; needed pre-login).
 router.get('/pubkey', authController.serverPubkey);

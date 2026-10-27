@@ -31,7 +31,14 @@ const FREE_PERSONAS = {
 // AI Chat Controller (/api/chat)
 async function chat(req, res) {
     await connectToDatabase();
-    const conf = await AppConfig.findOne({ key: 'global_config' });
+    // v91 (BugHunter backend F4): config load wrapped — a DB blip used to
+    // throw an unhandled rejection and hang the request until Vercel killed it.
+    let conf;
+    try {
+        conf = await AppConfig.findOne({ key: 'global_config' });
+    } catch (_) {
+        return res.status(503).json({ success: false, error: 'Database offline. Please try again.' });
+    }
     if (conf?.maintenance?.enabled) {
         return res.status(503).json({ success: false, error: conf.maintenance.message });
     }
@@ -42,6 +49,11 @@ async function chat(req, res) {
     // victim's personal Gemini key quota).
     const username = req.user?.username;
     if (!message) return res.status(400).json({ success: false, error: 'Message required.' });
+    // v91 (BugHunter backend F30): message was unbounded (up to the 15MB body
+    // limit) and passed straight to the provider chain. Cap at 16KB.
+    if (typeof message === 'string' && message.length > 16384) {
+        return res.status(400).json({ success: false, error: 'Message is too long (max 16384 characters).' });
+    }
 
     // STRUCTURED OUTPUT opt-in (Story Video v2, Phase A — 2026-10-21):
     // boolean true or the string 'true'. Non-structured requests never
@@ -56,11 +68,19 @@ async function chat(req, res) {
     const userGeminiKey = '';
     let dbUser = null;
     if (username) {
-        const user = await User.findOne({ username });
+        let user;
+        try {
+            user = await User.findOne({ username });
+        } catch (_) {
+            return res.status(503).json({ success: false, error: 'Database offline. Please try again.' });
+        }
         if (user) {
             dbUser = user;
             if (user.status === 'banned') return res.status(403).json({ success: false, error: 'Suspended.' });
-            if (user.customPrompt?.trim()) effectivePrompt = user.customPrompt.trim();
+            // v91 (BugHunter backend F30): customPrompt is injected verbatim
+            // into the system instruction — cap it (admin update validates
+            // 4000 too, but old rows are uncapped).
+            if (user.customPrompt?.trim()) effectivePrompt = user.customPrompt.trim().slice(0, 4000);
         }
     }
 
@@ -135,7 +155,8 @@ async function chat(req, res) {
         }
     }
 
-    const modelToUse = conf?.currentModel || 'gemini-2.5-flash';
+    const modelToUse = conf?.currentModel || 'gemini-3.6-flash';
+    const t0 = Date.now();
     try {
         // PHASE H: multi-provider free fallback chain — Groq -> Gemini pool
         // (user's own key first, then shared pool) -> OpenRouter :free.
@@ -147,6 +168,17 @@ async function chat(req, res) {
         // Contract unchanged: { success: true, reply, model } — the app's
         // /api/ai/chat and /api/chat callers see no shape change.
         const sent = res.json({ success: true, reply, model: modelToUse });
+        // v91 (BugHunter backend F10): the daily budget was CLIENT-REPORTED
+        // only — a client that never called /api/ai/usage/report chatted
+        // unlimited on the owner's quota. The server now accumulates the
+        // elapsed provider time per call (free users only; PRO is unlimited).
+        // Client reports still add session wall-time (the dominant share);
+        // the server leg is bounded to provider latency, so honest users are
+        // not double-charged in any material way.
+        if (!isStructured && username && dbUser && !aiUsage.isUnlimited(dbUser)) {
+            const elapsedSec = Math.min(3600, Math.max(1, Math.round((Date.now() - t0) / 1000)));
+            aiUsage.addUsage(username, dbUser.displayKamalId || '', elapsedSec, dbUser).catch(() => {});
+        }
         // AI MEMORY EXTRACTION (2026-10-20): fire-and-forget AFTER the
         // reply is sent — never blocks or fails the chat response. Learns
         // durable facts the user stated about themselves (PRO + enabled
@@ -176,8 +208,49 @@ async function getSystemPrompt(req, res) {
             success: true,
             systemPrompt: conf?.systemPrompt,
             liveInstructions: conf?.liveInstructions || '',
-            currentModel: conf?.currentModel || 'gemini-2.5-flash',
+            currentModel: conf?.currentModel || 'gemini-3.6-flash',
             featureFlags: conf?.featureFlags
+        });
+    } catch (e) {
+        return res.status(500).json({ success: false, error: e.message });
+    }
+}
+
+// v91 (BugHunter API P0-1 / frontback F1): POST /api/ai/system-prompt did
+// not exist on the server — the app's admin prompt publish always 404d while
+// reporting success. The owner (role 'admin' or ADMIN_USER) can now publish
+// the system prompt / live instructions / current model; every device reads
+// them via the GET endpoint.
+async function updateSystemPrompt(req, res) {
+    await connectToDatabase();
+    const username = req.user?.username;
+    if (!username) return res.status(401).json({ success: false, error: 'Authentication required.' });
+    try {
+        const env = require('../config/env');
+        const user = await User.findOne({ username }).select('role').lean();
+        const isOwner = user?.role === 'admin' || username === env.ADMIN_USER;
+        if (!isOwner) {
+            return res.status(403).json({ success: false, error: 'Only the owner can publish the system prompt.' });
+        }
+        const { systemPrompt, liveInstructions, currentModel } = req.body || {};
+        const set = {};
+        if (systemPrompt !== undefined) set.systemPrompt = String(systemPrompt).slice(0, 8000);
+        if (liveInstructions !== undefined) set.liveInstructions = String(liveInstructions).slice(0, 4000);
+        if (currentModel !== undefined) set.currentModel = String(currentModel).slice(0, 100);
+        if (Object.keys(set).length === 0) {
+            return res.status(400).json({ success: false, error: 'Nothing to update.' });
+        }
+        const conf = await AppConfig.findOneAndUpdate(
+            { key: 'global_config' },
+            { $set: set, $setOnInsert: { key: 'global_config' } },
+            { upsert: true, new: true }
+        );
+        return res.json({
+            success: true,
+            message: 'System prompt published.',
+            systemPrompt: conf.systemPrompt,
+            liveInstructions: conf.liveInstructions || '',
+            currentModel: conf.currentModel
         });
     } catch (e) {
         return res.status(500).json({ success: false, error: e.message });
@@ -219,6 +292,7 @@ async function reportUsage(req, res) {
 module.exports = {
     chat,
     getSystemPrompt,
+    updateSystemPrompt,
     getUsage,
     reportUsage
 };

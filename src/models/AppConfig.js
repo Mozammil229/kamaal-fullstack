@@ -48,8 +48,10 @@ const AppConfigSchema = new mongoose.Schema({
     // v59: default carries the flash answer-style rule (admin-editable);
     // keep in sync with DEFAULT_LIVE_INSTRUCTIONS in liveTokenService.js.
     liveInstructions: { type: String, default: 'Jawab hamesha 1 se 6 short lines mein do, dostana aur seedha — bina soche hue dikhaye, bina lambi tafseel ke.' },
-    currentModel: { type: String, default: 'gemini-2.5-flash' },
-    referralReward: { type: Number, default: 10 }
+    currentModel: { type: String, default: 'gemini-3.6-flash' },
+    // v91 (BugHunter DB P1-12): the live-verified reward is 5+5. Default was
+    // 10 and nothing ever read it; referralController now reads this value.
+    referralReward: { type: Number, default: 5 }
 });
 
 module.exports = mongoose.models.AppConfig || mongoose.model('AppConfig', AppConfigSchema);

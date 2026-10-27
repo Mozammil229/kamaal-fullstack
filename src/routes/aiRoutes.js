@@ -57,6 +57,10 @@ router.post('/live/token', authenticateUser, liveTokenRateLimit, liveController.
 // ApiClient authInterceptor injects the Bearer token on every request,
 // and fetchServerSystemPrompt() fails soft (null) when logged out.
 router.get('/ai/system-prompt', authenticateUser, aiController.getSystemPrompt);
+// v91 (BugHunter API P0-1 / frontback F1): POST /api/ai/system-prompt did
+// not exist — the app's admin prompt publish always 404d. Owner-gated in
+// the controller (role 'admin' or ADMIN_USER).
+router.post('/ai/system-prompt', authenticateUser, aiController.updateSystemPrompt);
 // DAILY FREE-AI TIME BUDGET (2026-10-20): remaining-seconds lookup +
 // elapsed-time report for the FREE tier's 20 min/day ONLINE AI pool.
 router.get('/ai/usage', authenticateUser, aiController.getUsage);

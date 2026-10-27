@@ -16,6 +16,16 @@ const GEMINI_KEYS = Array.from(new Set(
 let keyIndex = 0;
 const rateLimitedKeys = new Map();
 
+// v91 (BugHunter backend F2): race a promise against a timer so a stalled
+// provider attempt fails fast instead of hanging the Vercel function.
+function withTimeout(promise, ms, message) {
+    let timer;
+    const timeout = new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(message || `Timed out after ${ms}ms`)), ms);
+    });
+    return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 async function generateWithKeys(keys, message, systemInstruction, modelName = 'gemini-2.5-flash') {
     if (!keys || keys.length === 0) {
         const err = new Error('Gemini API key is not configured on the server. Set GEMINI_API_KEY in the server environment variables.');
@@ -48,7 +58,15 @@ async function generateWithKeys(keys, message, systemInstruction, modelName = 'g
                     model: mName,
                     systemInstruction: systemInstruction
                 });
-                const result = await model.generateContent(message);
+                // v91 (BugHunter backend F2): the Gemini leg had NO timeout —
+                // a stalled model hung the call until Vercel killed the
+                // function (15s Hobby default) and the client saw a hang, not
+                // JSON. Each attempt is now bounded to 15s.
+                const result = await withTimeout(
+                    model.generateContent(message),
+                    15 * 1000,
+                    `Gemini ${mName} timed out after 15s`
+                );
                 const reply = result.response.text();
                 if (reply && reply.trim()) {
                     keyIndex = (keyIndex + k) % keys.length;
@@ -104,9 +122,10 @@ async function generateWithUserKeyFirst(userKey, message, systemInstruction, mod
 // BYOK key test: tiny hello with ONLY the given key (no fallback). Throws if bad.
 // No remaining callers since the BYOK endpoints were removed in Safai;
 // kept as a harmless utility export.
+// v91 (BugHunter backend F31): was hardcoded to retired gemini-2.5-flash.
 async function testUserKey(userKey) {
     const clean = String(userKey || '').trim();
-    return generateWithKeys([clean], 'Say hello in exactly 3 words.', 'You are a helpful assistant.', 'gemini-2.5-flash');
+    return generateWithKeys([clean], 'Say hello in exactly 3 words.', 'You are a helpful assistant.', 'gemini-3.6-flash');
 }
 
 module.exports = {

@@ -19,10 +19,23 @@ const { connectToDatabase } = require('../config/db');
 const User = require('../models/User');
 const Referral = require('../models/Referral');
 const Transaction = require('../models/Transaction');
-const { bumpEarnedAndRetag } = require('../services/socialTagService');
 
 // Fixed reward per spec: 5 to the referrer, 5 to the newcomer.
 const REFERRAL_REWARD_CREDITS = 5;
+
+// v91 (BugHunter DB P1-12): the reward used to be hardcoded here while
+// AppConfig.referralReward (default 10, admin-editable) was never read —
+// three sources disagreed. The config is now the source of truth (default
+// 5, matching the live-verified 5-5 reward); this constant is the fallback.
+async function getRewardCredits() {
+    try {
+        const { getActiveConfig } = require('./configController');
+        const conf = await getActiveConfig();
+        const r = Number(conf?.referralReward);
+        if (Number.isFinite(r) && r >= 0) return Math.floor(r);
+    } catch (_) { /* fall through to the default */ }
+    return REFERRAL_REWARD_CREDITS;
+}
 
 /**
  * Deterministic code: "KML-" + first 6 hex chars of
@@ -50,7 +63,8 @@ async function getOrAssignCode(user) {
     }
     const code = deriveReferralCode(user.username, user.displayKamalId || '');
     user.referralCode = code;
-    try { await user.save(); } catch (_) { /* best-effort */ }
+    // v91 (BugHunter DB P1-13): targeted $set, not whole-doc save().
+    try { await User.updateOne({ _id: user._id }, { $set: { referralCode: code } }); } catch (_) { /* best-effort */ }
     return code;
 }
 
@@ -90,6 +104,7 @@ async function applyReferralFor({ code, user, kamalId }) {
     }
 
     // Create the row FIRST: the unique index makes this atomic against races.
+    const reward = await getRewardCredits();
     let row;
     try {
         row = await Referral.create({
@@ -100,7 +115,7 @@ async function applyReferralFor({ code, user, kamalId }) {
             referredUsername: user.username,
             referredKamalId: kid,
             status: 'applied',
-            creditsAwarded: REFERRAL_REWARD_CREDITS * 2
+            creditsAwarded: reward * 2
         });
     } catch (e) {
         if (e && e.code === 11000) {
@@ -109,20 +124,45 @@ async function applyReferralFor({ code, user, kamalId }) {
         return { ok: false, status: 500, error: 'Referral save nahi ho saka. Thodi der baad try karo.' };
     }
 
-    // Award 5 + 5 server-side.
-    referrer.credits = (referrer.credits || 0) + REFERRAL_REWARD_CREDITS;
-    bumpEarnedAndRetag(referrer, REFERRAL_REWARD_CREDITS);
-    await referrer.save();
-    user.credits = (user.credits || 0) + REFERRAL_REWARD_CREDITS;
-    bumpEarnedAndRetag(user, REFERRAL_REWARD_CREDITS);
-    await user.save();
+    // Award reward + reward server-side, atomically (v91, BugHunter backend
+    // F16 / DB P1-5): the old read-modify-write saves could partially fail —
+    // referrer kept +5, referred got +0, and the row already existed so the
+    // retry was blocked 409 forever. If either grant fails, the row is
+    // deleted so the referral can be retried.
+    const { computeSocialTag } = require('../services/socialTagService');
+    try {
+        const [refAfter, userAfter] = await Promise.all([
+            User.findOneAndUpdate(
+                { _id: referrer._id },
+                {
+                    $inc: { credits: reward, creditsEarned: reward },
+                    $set: { tag: computeSocialTag((Number(referrer.creditsEarned) || 0) + reward) }
+                },
+                { new: true }
+            ),
+            User.findOneAndUpdate(
+                { _id: user._id },
+                {
+                    $inc: { credits: reward, creditsEarned: reward },
+                    $set: { tag: computeSocialTag((Number(user.creditsEarned) || 0) + reward) }
+                },
+                { new: true }
+            )
+        ]);
+        if (!refAfter || !userAfter) throw new Error('Grant target missing.');
+        referrer.credits = refAfter.credits;
+        user.credits = userAfter.credits;
+    } catch (grantErr) {
+        try { await Referral.deleteOne({ _id: row._id }); } catch (_) { /* rollback best-effort */ }
+        return { ok: false, status: 500, error: 'Referral grant nahi ho saka. Dobara try karo.' };
+    }
 
     try {
         await Transaction.create([
             {
                 username: referrer.username,
                 type: 'referral_bonus',
-                creditsChange: REFERRAL_REWARD_CREDITS,
+                creditsChange: reward,
                 newBalance: referrer.credits,
                 description: `Referral reward: ${user.username} joined with your code ${referrer.referralCode}`,
                 adminUser: 'referral-system'
@@ -130,7 +170,7 @@ async function applyReferralFor({ code, user, kamalId }) {
             {
                 username: user.username,
                 type: 'referral_bonus',
-                creditsChange: REFERRAL_REWARD_CREDITS,
+                creditsChange: reward,
                 newBalance: user.credits,
                 description: `Welcome bonus: joined with ${referrer.username}'s code ${referrer.referralCode}`,
                 adminUser: 'referral-system'
@@ -142,7 +182,7 @@ async function applyReferralFor({ code, user, kamalId }) {
         ok: true,
         status: 200,
         referrerUsername: referrer.username,
-        creditsAdded: REFERRAL_REWARD_CREDITS,
+        creditsAdded: reward,
         newBalance: user.credits,
         referralId: String(row._id)
     };

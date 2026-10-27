@@ -134,11 +134,31 @@ function generateToken(username) {
     );
 }
 
+// v91 (BugHunter DB P0-3 / backend F12): normalize a login identifier the
+// same way register stores it — Pakistani phone to +92 form, anything else
+// lowercased (usernames are stored lowercase, emails are case-insensitive).
+// The old code signed the token from the RAW identifier before the lookup,
+// so an email/phone login minted a token whose username matched no user.
+function normalizeLoginIdentifier(raw) {
+    const digits = String(raw).replace(/\D/g, '');
+    if (digits.length === 11 && digits.startsWith('03')) return '+92' + digits.substring(1);
+    if ((digits.length === 12 || digits.length === 13) && digits.startsWith('92')) return '+' + digits;
+    return String(raw).toLowerCase();
+}
+
 // Register Controller
 async function register(req, res) {
     await connectToDatabase();
-    const { getActiveConfig } = require('./configController');
-    const conf = await getActiveConfig();
+    // v91 (BugHunter backend F4): getActiveConfig() used to run outside any
+    // try/catch — a DB blip or first-create race threw an unhandled rejection
+    // and the request hung until Vercel killed it.
+    let conf;
+    try {
+        const { getActiveConfig } = require('./configController');
+        conf = await getActiveConfig();
+    } catch (_) {
+        return res.status(503).json({ success: false, error: 'Database offline. Please try again.' });
+    }
     if (conf?.maintenance?.enabled) {
         return res.status(503).json({ success: false, error: conf.maintenance.message });
     }
@@ -189,6 +209,16 @@ async function register(req, res) {
         }
     }
 
+    // v91 (BugHunter backend F28): email was stored unvalidated and never
+    // uniqueness-checked, so email login was ambiguous. Validate format here;
+    // uniqueness is checked inside the try block below (needs the DB guard).
+    const cleanEmail = String(email == null ? '' : email).trim().toLowerCase();
+    if (cleanEmail !== '') {
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+            return res.status(400).json({ success: false, error: 'Please enter a valid email address.' });
+        }
+    }
+
     const pHash = hashPassword(plainPassword);
     const token = generateToken(cleanUsername);
     // PHASE D — deterministic referral code: "KML-" + first 6 of
@@ -208,6 +238,15 @@ async function register(req, res) {
             return res.status(400).json({ success: false, error: 'Username is already taken.' });
         }
 
+        // v91 (BugHunter backend F28): email uniqueness (partial unique index
+        // backs this check; legacy '' rows are unaffected).
+        if (cleanEmail !== '') {
+            const emailTaken = await User.findOne({ email: cleanEmail });
+            if (emailTaken) {
+                return res.status(400).json({ success: false, error: 'This email is already registered.' });
+            }
+        }
+
         // Hardware device binding check
         if (deviceId) {
             const boundUser = await User.findOne({ deviceId: deviceId.trim(), status: 'active' });
@@ -222,7 +261,8 @@ async function register(req, res) {
         // PHASE D — the optional referral code is applied AFTER the user row
         // exists (the Referral row's unique referredKamalId fraud guard needs
         // the new _id). Base signup credits only here.
-        const baseCredits = conf?.defaultSignupCredits || 2;
+        // v91 (BugHunter DB P2-24): `|| 2` silently overrode an admin-set 0.
+        const baseCredits = conf?.defaultSignupCredits ?? 2;
         const pendingReferralCode = referralCode ? String(referralCode).trim() : '';
 
         // Phone uniqueness (defense in depth alongside the partial unique index).
@@ -236,7 +276,7 @@ async function register(req, res) {
         const newUser = await User.create({
             username: cleanUsername,
             name: cleanName,
-            email: email || '',
+            email: cleanEmail,
             phone: cleanPhone,
             passwordHash: pHash,
             token,
@@ -248,7 +288,9 @@ async function register(req, res) {
             status: 'active',
             tier: 'FREE',
             proPlan: 'trial',
-            planExpiry: 'Lifetime'
+            // v91 (BugHunter DB P2-23): trial users no longer report a
+            // 'Lifetime' expiry — trial has no expiry string.
+            planExpiry: ''
         });
 
         // PHASE B: create the Kamal ID device binding in the same flow.
@@ -306,17 +348,26 @@ async function register(req, res) {
 // Login Controller
 async function login(req, res) {
     await connectToDatabase();
-    const { getActiveConfig } = require('./configController');
-    const conf = await getActiveConfig();
+    // v91 (BugHunter backend F4): config load wrapped — see register.
+    let conf;
+    try {
+        const { getActiveConfig } = require('./configController');
+        conf = await getActiveConfig();
+    } catch (_) {
+        return res.status(503).json({ success: false, error: 'Database offline. Please try again.' });
+    }
     if (conf?.maintenance?.enabled) {
         return res.status(503).json({ success: false, error: conf.maintenance.message });
     }
 
     const { email, username, password, deviceId } = req.body;
-    const identifier = String(email || username || req.body?.phone || '').trim();
-    if (!identifier || !password) {
+    const rawIdentifier = String(email || username || req.body?.phone || '').trim();
+    if (!rawIdentifier || !password) {
         return res.status(400).json({ success: false, error: 'Username/Email and Password are required.' });
     }
+    // v91 (BugHunter DB P0-3): normalize BEFORE the lookup (phone -> +92,
+    // username/email -> lowercase), exactly as register stores them.
+    const identifier = normalizeLoginIdentifier(rawIdentifier);
     // PHASE F: decrypt an RSA-encrypted password before verification.
     let plainPassword;
     try {
@@ -329,8 +380,6 @@ async function login(req, res) {
     if (!isDbConnected()) {
         return res.status(503).json({ success: false, error: 'Database offline. User login requires database connection.' });
     }
-
-    const token = generateToken(identifier);
 
     try {
         // NOTE: passwordHash is select:false — explicitly include it for verification.
@@ -348,16 +397,13 @@ async function login(req, res) {
         if (!ok) {
             return res.status(401).json({ success: false, error: 'Invalid credentials.' });
         }
-        // Transparent migration: a legacy hash worked → re-hash with bcrypt now.
-        if (migrate) {
-            user.passwordHash = hashPassword(plainPassword);
-        }
 
         if (user.status === 'banned') {
             return res.status(403).json({ success: false, error: `Account Suspended: ${user.banReason || 'Policy violation'}` });
         }
 
         // Hardware lock check & bind
+        let bindDevice = null;
         if (deviceId) {
             const cleanDevice = deviceId.trim();
             if (user.deviceId && user.deviceId !== cleanDevice) {
@@ -367,13 +413,24 @@ async function login(req, res) {
                 });
             }
             if (!user.deviceId) {
-                user.deviceId = cleanDevice;
+                bindDevice = cleanDevice;
             }
         }
 
+        // v91 (BugHunter DB P0-3): the token is signed from the RESOLVED
+        // user.username — the old code signed the raw identifier before the
+        // lookup, so email/phone logins minted unusable tokens.
+        const token = generateToken(user.username);
+        // v91 (BugHunter DB P1-13): targeted $set instead of whole-doc save()
+        // — save() revalidates every path, so a legacy out-of-enum document
+        // made login 500 forever.
+        const set = { token, lastActiveAt: new Date() };
+        // Transparent migration: a legacy hash worked → re-hash with bcrypt now.
+        if (migrate) set.passwordHash = hashPassword(plainPassword);
+        if (bindDevice) set.deviceId = bindDevice;
+        await User.updateOne({ _id: user._id }, { $set: set });
         user.token = token;
-        user.lastActiveAt = new Date();
-        await user.save();
+        if (bindDevice) user.deviceId = bindDevice;
 
         return res.json({
             success: true,
@@ -401,8 +458,8 @@ async function verify(req, res) {
         if (!user) return res.status(404).json({ success: false, error: 'User not found.' });
         if (user.status === 'banned') return res.status(403).json({ success: false, error: `Account suspended: ${user.banReason || 'Banned'}` });
 
-        user.lastActiveAt = new Date();
-        await user.save();
+        // v91 (BugHunter DB P1-13): targeted $set, not whole-doc save().
+        await User.updateOne({ _id: user._id }, { $set: { lastActiveAt: new Date() } });
         // SECURITY FIX (#3): allowlisted user object — no passwordHash/customGeminiKey.
         return res.json({ success: true, user: toSafeUser(user) });
     } catch (e) {
@@ -410,10 +467,23 @@ async function verify(req, res) {
     }
 }
 
+// v91 (BugHunter backend F26): user logout — revokes the bearer token so it
+// stops working immediately instead of staying valid for up to 30 days.
+// The app calls this before clearing its local session (Phase 2).
+async function userLogout(req, res) {
+    const rawToken = req.headers['authorization']?.replace(/^Bearer\s+/i, '');
+    if (rawToken && typeof rawToken === 'string') {
+        const { revokeToken } = require('../middleware/auth');
+        await revokeToken(rawToken.trim(), 'user_logout');
+    }
+    return res.json({ success: true, message: 'Logged out.' });
+}
+
 module.exports = {
     register,
     login,
     verify,
+    userLogout,
     serverPubkey,
     maybeDecryptPassword
 };

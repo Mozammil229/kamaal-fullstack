@@ -49,17 +49,21 @@ let localConfig = {
     // in liveTokenService.js). The locked LIVE_ANSWER_STYLE block enforces
     // the same rule even when this field is empty.
     liveInstructions: 'Jawab hamesha 1 se 6 short lines mein do, dostana aur seedha — bina soche hue dikhaye, bina lambi tafseel ke.',
-    currentModel: 'gemini-2.5-flash',
-    referralReward: 10
+    // v91 (BugHunter DB P2-23): the retired gemini-2.5-flash was the default.
+    currentModel: 'gemini-3.6-flash',
+    referralReward: 5
 };
 
 async function getActiveConfig() {
     await connectToDatabase();
     if (isDbConnected()) {
-        let conf = await AppConfig.findOne({ key: 'global_config' });
-        if (!conf) {
-            conf = await AppConfig.create(localConfig);
-        }
+        // v91 (BugHunter DB P1-9): atomic upsert — the old findOne + create
+        // raced on cold starts (two invocations -> E11000 on the unique key).
+        const conf = await AppConfig.findOneAndUpdate(
+            { key: 'global_config' },
+            { $setOnInsert: localConfig },
+            { upsert: true, new: true }
+        );
         return conf;
     }
     return localConfig;
@@ -91,10 +95,10 @@ async function getAppConfig(req, res) {
 // the installed versionCode against this payload. Contract (Android
 // AppVersionResponse, parsed as the BARE body — no success envelope):
 // { versionCode, versionName, downloadUrl, forceUpdate, message }.
-// Latest shipped release: versionCode 40 / "1.0.39" (2026-10-21). Bump
-// LATEST_VERSION_CODE / LATEST_VERSION_NAME when a newer APK ships.
-const LATEST_VERSION_CODE = 43;
-const LATEST_VERSION_NAME = '1.0.42';
+// Latest shipped release: versionCode 91 / "1.0.90" (2026-10-27, v91 hotfix).
+// Bump LATEST_VERSION_CODE / LATEST_VERSION_NAME when a newer APK ships.
+const LATEST_VERSION_CODE = 91;
+const LATEST_VERSION_NAME = '1.0.90';
 
 async function getAppVersion(req, res) {
     try {

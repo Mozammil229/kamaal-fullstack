@@ -28,6 +28,10 @@ const UserMemorySchema = new mongoose.Schema({
     enabled: { type: Boolean, default: true },
     facts: { type: [MemoryFactSchema], default: [] },
     updatedAt: { type: Date, default: Date.now },
-});
+    // v91 (BugHunter DB P2-17): optimistic concurrency — two concurrent
+    // chat replies used to load the same doc and last-writer-wins overwrite
+    // each other's extracted facts. With this on, save() throws VersionError
+    // on a stale __v and extractAndSave retries once against fresh data.
+}, { optimisticConcurrency: true });
 
 module.exports = mongoose.models.UserMemory || mongoose.model('UserMemory', UserMemorySchema);

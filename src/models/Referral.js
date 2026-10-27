@@ -18,8 +18,9 @@ const ReferralSchema = new mongoose.Schema({
     // Kamal ID (masked display ID) of the invited device — UNIQUE, one per device.
     referredKamalId: { type: String, required: true, unique: true },
     status: { type: String, enum: ['pending', 'applied'], default: 'applied', index: true },
-    // Total credits awarded by this row (20 referrer + 20 referred = 40).
-    creditsAwarded: { type: Number, default: 40 },
+    // Total credits awarded by this row (5 referrer + 5 referred = 10).
+    // v91 (BugHunter DB P1-12): default was 40 with a stale "20+20" comment.
+    creditsAwarded: { type: Number, default: 10 },
     createdAt: { type: Date, default: Date.now, index: true }
 });
 

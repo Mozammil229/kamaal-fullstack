@@ -25,7 +25,9 @@ const UserSchema = new mongoose.Schema({
     // structured/XML path in /api/chat returns 403 BETA_REQUIRED without it.
     betaMember: { type: Boolean, default: false },
     proPlan: { type: String, enum: ['none', 'trial', 'monthly', 'yearly', 'lifetime'], default: 'trial' },
-    planExpiry: { type: String, default: 'Lifetime' },
+    // v91 (BugHunter DB P2-23): trial users had planExpiry 'Lifetime' — a
+    // contradiction (trial is not lifetime). Trial now has no expiry string.
+    planExpiry: { type: String, default: '' },
     planExpiryDate: { type: Date, default: null },
     tier: { type: String, default: 'FREE' },
     status: { type: String, enum: ['active', 'banned'], default: 'active' },
@@ -55,5 +57,13 @@ const UserSchema = new mongoose.Schema({
 // unique index only applies to documents carrying a real phone number, so
 // legacy '' values never collide.
 UserSchema.index({ phone: 1 }, { unique: true, partialFilterExpression: { phone: { $ne: '' } } });
+
+// v91 (BugHunter DB P1-16): hot-query indexes. Email gets the same partial-
+// unique treatment as phone (real emails unique, legacy '' rows unaffected).
+UserSchema.index({ email: 1 }, { unique: true, partialFilterExpression: { email: { $ne: '' } } });
+UserSchema.index({ referralCode: 1 });
+UserSchema.index({ createdAt: -1 });
+UserSchema.index({ lastActiveAt: -1 });
+UserSchema.index({ isPro: 1 });
 
 module.exports = mongoose.models.User || mongoose.model('User', UserSchema);

@@ -6,7 +6,9 @@ const mongoose = require('mongoose');
 const StorySchema = new mongoose.Schema({
     username: { type: String, required: true, index: true },
     photoUrl: { type: String, required: true },
-    expiresAt: { type: Number, required: true, index: true },
+    // v91 (BugHunter DB P1-11): MongoDB TTL only acts on Date fields — the old
+    // Number type meant expired stories were never auto-deleted. Date now.
+    expiresAt: { type: Date, required: true, index: true },
     createdAt: { type: Number, default: Date.now }
 });
 

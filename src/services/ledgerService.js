@@ -42,17 +42,25 @@ async function modifyCredits({ username, amount, type, description, adminUser, p
         }
     } catch (_) { /* tag recompute is non-critical */ }
 
-    // Record immutable audit transaction
-    const tx = await Transaction.create({
-        username: updatedUser.username,
-        type: type || (delta > 0 ? 'admin_grant' : 'usage_deduct'),
-        creditsChange: delta,
-        newBalance: updatedUser.credits,
-        plan: plan || updatedUser.proPlan || '',
-        planExpiry: planExpiry || updatedUser.planExpiry || '',
-        description: description || `Credits changed by ${delta}`,
-        adminUser: adminUser || 'System'
-    });
+    // Record immutable audit transaction — BEST-EFFORT (v91, BugHunter
+    // backend F7): the balance already moved atomically above. A ledger
+    // failure must never 500 after the money moved (the old throw made the
+    // client retry and double-deduct). The failure is logged for the audit.
+    let tx = null;
+    try {
+        tx = await Transaction.create({
+            username: updatedUser.username,
+            type: type || (delta > 0 ? 'admin_grant' : 'usage_deduct'),
+            creditsChange: delta,
+            newBalance: updatedUser.credits,
+            plan: plan || updatedUser.proPlan || '',
+            planExpiry: planExpiry || updatedUser.planExpiry || '',
+            description: description || `Credits changed by ${delta}`,
+            adminUser: adminUser || 'System'
+        });
+    } catch (e) {
+        console.error('[ledger] audit row failed after balance move:', e.message);
+    }
 
     return { user: updatedUser, transaction: tx };
 }

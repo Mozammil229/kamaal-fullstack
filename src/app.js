@@ -29,8 +29,11 @@ const { loginRateLimit } = require('./routes/authRoutes');
 const app = express();
 
 app.use(cors({ origin: '*', credentials: true }));
-app.use(express.json({ limit: '15mb' }));
-app.use(express.urlencoded({ extended: true, limit: '15mb' }));
+// v91 (BugHunter backend F28): the JSON body limit was 15MB — far above
+// anything the API accepts (largest legit JSON payload is a 64KB crash
+// stack trace). 4MB caps abuse (oversized message/recipe bodies) early.
+app.use(express.json({ limit: '4mb' }));
+app.use(express.urlencoded({ extended: true, limit: '4mb' }));
 
 // Request logging in development
 if (process.env.NODE_ENV !== 'production') {

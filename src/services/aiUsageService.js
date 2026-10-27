@@ -48,19 +48,40 @@ async function hasBudgetLeft(username, user) {
 /**
  * Atomically adds elapsed seconds to today's pool for [username].
  * Returns the fresh usage snapshot (same shape as getUsage).
+ * v91 (BugHunter DB P1-15): the upsert raced on first-report (E11000) and
+ * the $inc had no cap, so concurrent reports could push secondsUsed past
+ * the daily limit. Now: pre-read the used total, add at most the remaining
+ * headroom, and retry once on E11000 (a concurrent insert won the race).
  */
 async function addUsage(username, kamalId, seconds, user) {
     const s = Math.max(0, Math.min(Math.floor(Number(seconds) || 0), 3600)); // sanity cap per report
     if (s > 0) {
-        await AiUsage.findOneAndUpdate(
-            { username, date: pktToday() },
-            {
-                $inc: { secondsUsed: s },
+        const today = pktToday();
+        const current = await AiUsage.findOne({ username, date: today }).lean();
+        const used = current?.secondsUsed || 0;
+        const headroom = Math.max(0, DAILY_LIMIT_SECONDS - used);
+        const add = Math.min(s, headroom);
+        if (add > 0) {
+            const update = {
+                $inc: { secondsUsed: add },
                 $set: { updatedAt: new Date(), ...(kamalId ? { kamalId } : {}) },
-                $setOnInsert: { username, date: pktToday() },
-            },
-            { upsert: true, new: true },
-        );
+                $setOnInsert: { username, date: today },
+            };
+            try {
+                await AiUsage.findOneAndUpdate({ username, date: today }, update, { upsert: true, new: true });
+            } catch (e) {
+                if (e && e.code === 11000) {
+                    // Concurrent first-report won the insert race — retry
+                    // without upsert; the row now exists.
+                    await AiUsage.findOneAndUpdate(
+                        { username, date: today },
+                        { $inc: { secondsUsed: add }, $set: { updatedAt: new Date(), ...(kamalId ? { kamalId } : {}) } }
+                    );
+                } else {
+                    throw e;
+                }
+            }
+        }
     }
     return getUsage(username, user);
 }

@@ -115,6 +115,12 @@ async function deleteCrashReport(req, res) {
         return res.status(503).json({ success: false, error: 'Database unavailable.' });
     }
     try {
+        // v91 (BugHunter backend F29): a malformed :id threw a CastError
+        // inside findByIdAndDelete (500). Validate first — bad ids are 400.
+        const mongoose = require('mongoose');
+        if (!mongoose.Types.ObjectId.isValid(String(req.params.id || ''))) {
+            return res.status(400).json({ success: false, error: 'Invalid report id.' });
+        }
         const doc = await CrashReport.findByIdAndDelete(req.params.id);
         if (!doc) return res.status(404).json({ success: false, error: 'Report not found.' });
         return res.json({ success: true });
