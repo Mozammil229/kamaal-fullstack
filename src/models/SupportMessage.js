@@ -10,8 +10,13 @@ const SupportMessageSchema = new mongoose.Schema({
     // v91: global admin broadcasts (visible to every user by design).
     broadcast: { type: Boolean, default: false },
     message: { type: String, required: true },
-    isAdmin: { type: Boolean, default: false },
+    isAdmin: { type: Boolean, default: false, index: true },
     timestamp: { type: Number, default: Date.now }
 });
+
+// v91 (BugHunter DB P1-16): getSupportMessages filters on sender /
+// recipientUsername / broadcast / deviceId and sorts by timestamp desc.
+SupportMessageSchema.index({ sender: 1, timestamp: -1 });
+SupportMessageSchema.index({ recipientUsername: 1, timestamp: -1 });
 
 module.exports = mongoose.models.SupportMessage || mongoose.model('SupportMessage', SupportMessageSchema);

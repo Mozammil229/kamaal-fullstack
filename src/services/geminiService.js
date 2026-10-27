@@ -119,19 +119,9 @@ async function generateWithUserKeyFirst(userKey, message, systemInstruction, mod
     return generateWithKeyPool(message, systemInstruction, modelName);
 }
 
-// BYOK key test: tiny hello with ONLY the given key (no fallback). Throws if bad.
-// No remaining callers since the BYOK endpoints were removed in Safai;
-// kept as a harmless utility export.
-// v91 (BugHunter backend F31): was hardcoded to retired gemini-2.5-flash.
-async function testUserKey(userKey) {
-    const clean = String(userKey || '').trim();
-    return generateWithKeys([clean], 'Say hello in exactly 3 words.', 'You are a helpful assistant.', 'gemini-3.6-flash');
-}
-
 module.exports = {
     generateWithKeyPool,
     generateWithUserKeyFirst,
-    testUserKey,
     // VOXPILOT PHASE 2 (v58): Live ephemeral-token minting needs the pool
     // order (primary first). Returns a copy; never logs keys.
     getGeminiKeys: () => GEMINI_KEYS.slice(),
