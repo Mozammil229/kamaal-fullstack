@@ -42,10 +42,18 @@ async function requestRecipe(req, res) {
     const username = req.user?.username;
     if (!username) return res.status(401).json({ success: false, error: 'Authentication required.' });
 
-    const { method, devicePubkeyPem, deviceId } = req.body || {};
+    const { method, devicePubkeyPem, deviceId, subMode } = req.body || {};
     const recipe = getRecipe(method);
     if (!recipe) {
-        return res.status(400).json({ success: false, error: 'Unknown patch method. Use "normal" or "pro".' });
+        return res.status(400).json({ success: false, error: 'Unknown patch method. Use "normal", "pro", "method3", "method4" or "method5".' });
+    }
+    // v90 Method 4: the client's TikTok/Instagram toggle is echoed into the
+    // recipe (server-validated; anything else is a 400). Only method4 uses it.
+    if (recipe.method === 'method4' && subMode !== undefined) {
+        if (subMode !== 'tiktok' && subMode !== 'instagram') {
+            return res.status(400).json({ success: false, error: 'Invalid subMode. Use "tiktok" or "instagram".' });
+        }
+        recipe.subMode = subMode;
     }
 
     let deviceKey;
@@ -63,8 +71,9 @@ async function requestRecipe(req, res) {
         if (user.status === 'banned') return res.status(403).json({ success: false, error: 'Account banned.' });
 
         // Pro recipes are a Pro entitlement: UI gating alone is bypassable,
-        // so the server enforces it here too.
-        if (recipe.method === 'pro' && !user.isPro) {
+        // so the server enforces it here too. Method 4 + Method 5 are
+        // PRO-gated like Forge (v90 decision); Method 3 stays free.
+        if ((recipe.method === 'pro' || recipe.method === 'method4' || recipe.method === 'method5') && !user.isPro) {
             return res.status(403).json({ success: false, error: 'Pro patching requires a Pro plan.' });
         }
 
