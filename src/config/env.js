@@ -43,5 +43,14 @@ module.exports = {
     // OpenRouter (FALLBACK 2, free :free routes). Default
     // openai/gpt-oss-20b:free (~20 req/min, small daily caps).
     OPENROUTER_API_KEY: (process.env.OPENROUTER_API_KEY || '').trim(),
-    OPENROUTER_MODEL: (process.env.OPENROUTER_MODEL || 'openai/gpt-oss-20b:free').trim()
+    OPENROUTER_MODEL: (process.env.OPENROUTER_MODEL || 'openai/gpt-oss-20b:free').trim(),
+    // DONUT FEED (YouTube Data API v3, nightly server cron). NO real key in
+    // code or git: the user creates the key in Google Cloud Console and sets
+    // YOUTUBE_API_KEY in the Vercel dashboard (Production) only. Until then
+    // POST/GET /api/donut/refresh answers 503 YOUTUBE_API_KEY_NOT_CONFIGURED
+    // and the feed serves the (empty) cache. CRON_SECRET is auto-provisioned
+    // by Vercel when the `crons` entry in vercel.json deploys; the cron
+    // sends it as `Authorization: Bearer <CRON_SECRET>`.
+    YOUTUBE_API_KEY: (process.env.YOUTUBE_API_KEY || '').trim(),
+    CRON_SECRET: (process.env.CRON_SECRET || '').trim()
 };

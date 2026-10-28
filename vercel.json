@@ -5,6 +5,12 @@
       "maxDuration": 60
     }
   },
+  "crons": [
+    {
+      "path": "/api/donut/refresh",
+      "schedule": "0 19 * * *"
+    }
+  ],
   "rewrites": [
     {
       "source": "/api/(.*)",

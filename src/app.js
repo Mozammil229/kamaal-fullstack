@@ -16,6 +16,9 @@ const messageRoutes = require('./routes/messageRoutes');
 const crashReportRoutes = require('./routes/crashReportRoutes');
 // v66 — Wink AI video enhance (stateless JSON proxy; server never gets video bytes).
 const winkRoutes = require('./routes/winkRoutes');
+// Donut feed (YouTube Data API nightly cache): GET /api/donut/feed,
+// GET|POST /api/donut/refresh (Vercel Cron secret or admin auth).
+const donutRoutes = require('./routes/donutRoutes');
 const deviceRoutes = require('./routes/deviceRoutes');
 const referralRoutes = require('./routes/referralRoutes');
 // PHASE F — server-side patcher: POST /api/patch/request, POST /api/patch/apply.
@@ -59,6 +62,12 @@ app.use('/api/referral', referralRoutes);
 // PHASE F — server-side patch recipes (methods live on the server, not in the APK).
 app.use('/api/patch', patchRoutes);
 // PHASE E — social: /api/social/* + /api/user/fcm-token (auth-only, JWT identity).
+// NOTE: donutRoutes is mounted BEFORE socialRoutes on purpose — socialRoutes
+// has a blanket router.use(authenticateUser) that rejects ANY non-user-JWT
+// Authorization header, which would 401 the Vercel Cron secret and the
+// admin JWT on /api/donut/refresh before cronOrAdminAuth ever runs.
+// (Caught by the local boot test 2026-10-28: both refresh auth paths 401'd.)
+app.use('/api', donutRoutes);
 app.use('/api', socialRoutes);
 // PHASE E — serve uploaded social media (server-randomized filenames only).
 app.use('/uploads', express.static(path.join(__dirname, '..', 'public', 'uploads')));
