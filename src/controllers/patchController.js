@@ -45,7 +45,7 @@ async function requestRecipe(req, res) {
     const { method, devicePubkeyPem, deviceId, subMode, authToken } = req.body || {};
     const recipe = getRecipe(method);
     if (!recipe) {
-        return res.status(400).json({ success: false, error: 'Unknown patch method. Use "normal", "pro", "method3", "method4" or "method5".' });
+        return res.status(400).json({ success: false, error: 'Unknown patch method. Use "normal", "pro", "method3", "method4", "method5" or "method6".' });
     }
     // v91 (BugHunter backend F6): a recipe is issued ONLY against a
     // server-side authorization record created by /api/authorize-patch (1
@@ -89,8 +89,10 @@ async function requestRecipe(req, res) {
 
         // Pro recipes are a Pro entitlement: UI gating alone is bypassable,
         // so the server enforces it here too. Method 4 + Method 5 are
-        // PRO-gated like Forge (v90 decision); Method 3 stays free.
-        if ((recipe.method === 'pro' || recipe.method === 'method4' || recipe.method === 'method5') && !user.isPro) {
+        // PRO-gated like Forge (v90 decision); Method 6 is PRO-gated the
+        // same way (v92 decision, user-approved on defaults); Method 3
+        // stays free.
+        if ((recipe.method === 'pro' || recipe.method === 'method4' || recipe.method === 'method5' || recipe.method === 'method6') && !user.isPro) {
             return res.status(403).json({ success: false, error: 'Pro patching requires a Pro plan.' });
         }
 

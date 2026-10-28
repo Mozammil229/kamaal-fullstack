@@ -95,10 +95,10 @@ async function getAppConfig(req, res) {
 // the installed versionCode against this payload. Contract (Android
 // AppVersionResponse, parsed as the BARE body — no success envelope):
 // { versionCode, versionName, downloadUrl, forceUpdate, message }.
-// Latest shipped release: versionCode 91 / "1.0.90" (2026-10-27, v91 hotfix).
+// Latest shipped release: versionCode 92 / "1.0.91" (2026-10-28, v92 hotfix + Method 6 + patcher slow-fix).
 // Bump LATEST_VERSION_CODE / LATEST_VERSION_NAME when a newer APK ships.
-const LATEST_VERSION_CODE = 91;
-const LATEST_VERSION_NAME = '1.0.90';
+const LATEST_VERSION_CODE = 92;
+const LATEST_VERSION_NAME = '1.0.91';
 
 async function getAppVersion(req, res) {
     try {

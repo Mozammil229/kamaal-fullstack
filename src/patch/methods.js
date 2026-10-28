@@ -225,11 +225,70 @@ const METHOD5 = Object.freeze({
     copyrightSource: null
 });
 
-const METHODS = Object.freeze({ normal: PULSE, pro: FORGE, method3: METHOD3, method4: METHOD4, method5: METHOD5 });
+// ---- METHOD 6 — Lavf mdta fingerprint (v92, user-approved) ----------------
+// Directive-style like Method 4/5: the client remuxes (video copy + AAC
+// copy/transcode + silent AAC if no audio — the remuxMethod45 base), then
+// shapes the output like the 5e reference: top order ftyp,moov,free,mdat;
+// mvhd v1 / timescale 1000 / duration all-ones / next_track 3; exactly 2
+// tracks; moov-level udta/meta/ilst with 7 mdta keys (major_brand,
+// minor_version, compatible_brands, te_is_reencode, artist, comment,
+// encoder); free box 400,722 bytes ASCII '0' between moov and mdat;
+// timestamps RETAINED (tkhd/mdhd creation/mod copied from the input, NOT
+// zeroed); Android moov-level meta copied byte-for-byte; co64 always.
+// Tag substitution (standing rule): the three third-party values
+// (transcode.vague-infinity.com, Nova, Lavf60.16.100) are replaced by
+// "Kamaal App" — this recipe carries the SUBSTITUTED values, never the
+// third-party ones. BUG-AS-IS (v92 plan §A.6): ASCII-'0' free, retained
+// timestamps, moov-level mdta, co64 on a small file, HEVC stsd padding,
+// VFR/rotation/coded 1088 preserved. No copyright key, no hash — the
+// reference carries none (that is Forge's differentiator, not Method 6's).
+// mdhd language: NOT stamped — preserved from the remux as-is (§A.2.1:
+// the reference raw field is 0x0000, ffprobe's 'eng' is its own inference;
+// do NOT hardcode eng or und), so streamLanguage is null like Method 3.
+const METHOD6 = Object.freeze({
+    method: 'method6',
+    profile: 'method6',
+    mode: 'lavf-mdta',
+    tag: 'Kamaal App',
+    metaStyle: 'mdta-moov',
+    keys: Object.freeze(['major_brand', 'minor_version', 'compatible_brands', 'te_is_reencode', 'artist', 'comment', 'encoder']),
+    keyValues: Object.freeze({
+        major_brand: 'isom',
+        minor_version: '512',
+        compatible_brands: 'isomiso2avc1mp41',
+        te_is_reencode: '1'
+    }),
+    // artist/comment/encoder are the SUBSTITUTED values (standing rule) —
+    // the client writes exactly these as the mdta values, never the
+    // reference's third-party values.
+    formatTags: Object.freeze({
+        artist: 'Kamaal App',
+        comment: 'Kamaal App',
+        encoder: 'Kamaal App'
+    }),
+    mvhdVersion: 1,
+    mvhdTimescale: 1000,
+    retainTimestamps: true,
+    retainAndroidMeta: true,
+    freeStyle: 'ascii-zero',
+    freeSize: 400722,
+    secondAudioTrack: 'none',
+    co64: true,
+    trailingFree: false,
+    limits: Object.freeze({ maxLong: 4096, maxShort: 2304, maxFps: 120.5, maxDurationS: 900 }),
+    ftyp: null,
+    dashTags: Object.freeze([]),
+    videoHandlerName: 'VideoHandle',
+    audioHandlerName: 'SoundHandle',
+    streamLanguage: null,
+    copyrightSource: null
+});
+
+const METHODS = Object.freeze({ normal: PULSE, pro: FORGE, method3: METHOD3, method4: METHOD4, method5: METHOD5, method6: METHOD6 });
 
 /**
  * Returns a deep-cloned recipe object for the given method
- * ("normal"|"pro"|"method3"|"method4"|"method5"), or null for an unknown method. Cloned so
+ * ("normal"|"pro"|"method3"|"method4"|"method5"|"method6"), or null for an unknown method. Cloned so
  * per-request code can never mutate the frozen canonical definitions.
  */
 function getRecipe(method) {
