@@ -247,6 +247,16 @@ const LIVE_TOOLS = [
                 name: 'draft_control',
                 description: 'Save, use, list or discard an approved draft (exact saved text, never invented): save (kind + recipient + exact text), use (returns the exact stored text and marks the draft USED), list (pending drafts), discard.',
                 parameters: { type: 'OBJECT', properties: { action: { type: 'STRING', description: 'save, use, list or discard' }, kind: { type: 'STRING', description: 'Draft kind, e.g. WHATSAPP_MESSAGE, for save' }, recipient: { type: 'STRING', description: 'Recipient display name, for save' }, text: { type: 'STRING', description: 'Exact draft text, for save' }, draft_id: { type: 'STRING', description: 'Draft id, for use/discard' } }, required: ['action'] }
+            },
+            {
+                name: 'get_latest_news',
+                description: 'Read the latest Pakistani headlines (Dawn, Geo News, Express Tribune and others). Use when the user asks for news / khabrein. Returns numbered headlines with their sources — speak them briefly (1-3 lines each), always naming the source, and report ONLY what the tool returned: never invent headlines, never fill gaps from memory.',
+                parameters: { type: 'OBJECT', properties: {} }
+            },
+            {
+                name: 'search_news',
+                description: 'Search the internet for the latest news about a topic and report the headlines. Use when the user asks about a specific topic\'s news. Returns numbered headlines with sources — speak them briefly, naming the source; report ONLY what the tool returned, never invent.',
+                parameters: { type: 'OBJECT', properties: { query: { type: 'STRING', description: 'News topic to search, e.g. \'Imran Khan\', \'petrol price\', \'Pakistan cricket\'' } }, required: ['query'] }
             }
         ]
     }

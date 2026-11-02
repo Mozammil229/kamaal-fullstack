@@ -19,6 +19,11 @@ const winkRoutes = require('./routes/winkRoutes');
 // Donut feed (YouTube Data API nightly cache): GET /api/donut/feed,
 // GET|POST /api/donut/refresh (Vercel Cron secret or admin auth).
 const donutRoutes = require('./routes/donutRoutes');
+// NEWS MODE N1 + N2 — Google News RSS headlines: GET /api/news,
+// GET /api/news/search?q=. Public (no JWT); mounted BEFORE socialRoutes
+// for the same reason as donutRoutes (socialRoutes' blanket
+// router.use(authenticateUser) would 401 these open endpoints).
+const newsRoutes = require('./routes/newsRoutes');
 const deviceRoutes = require('./routes/deviceRoutes');
 const referralRoutes = require('./routes/referralRoutes');
 // PHASE F — server-side patcher: POST /api/patch/request, POST /api/patch/apply.
@@ -68,6 +73,8 @@ app.use('/api/patch', patchRoutes);
 // admin JWT on /api/donut/refresh before cronOrAdminAuth ever runs.
 // (Caught by the local boot test 2026-10-28: both refresh auth paths 401'd.)
 app.use('/api', donutRoutes);
+// NEWS MODE: /api/news + /api/news/search (public; see newsRoutes.js).
+app.use('/api', newsRoutes);
 app.use('/api', socialRoutes);
 // PHASE E — serve uploaded social media (server-randomized filenames only).
 app.use('/uploads', express.static(path.join(__dirname, '..', 'public', 'uploads')));
