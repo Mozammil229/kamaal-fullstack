@@ -52,5 +52,11 @@ module.exports = {
     // by Vercel when the `crons` entry in vercel.json deploys; the cron
     // sends it as `Authorization: Bearer <CRON_SECRET>`.
     YOUTUBE_API_KEY: (process.env.YOUTUBE_API_KEY || '').trim(),
-    CRON_SECRET: (process.env.CRON_SECRET || '').trim()
+    CRON_SECRET: (process.env.CRON_SECRET || '').trim(),
+    // MULTI-AGENT P1 — ops audit trail internal key. Machine-to-machine key
+    // for agent actions hitting POST/GET /api/ops/audit (admin JWT also
+    // accepted — see opsRoutes.js). Set in the Vercel dashboard
+    // (Production) at deploy time; NEVER in git. Optional: when unset, only
+    // the admin-JWT path works.
+    OPS_INTERNAL_KEY: (process.env.OPS_INTERNAL_KEY || '').trim()
 };

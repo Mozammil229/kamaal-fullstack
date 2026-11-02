@@ -30,6 +30,9 @@ const referralRoutes = require('./routes/referralRoutes');
 const patchRoutes = require('./routes/patchRoutes');
 // PHASE E — Social app: threads/messages/feed/stories/contacts (blueprint E1/E2/E3/E5).
 const socialRoutes = require('./routes/socialRoutes');
+// MULTI-AGENT P1 — ops audit trail: POST/GET /api/ops/audit (internal key
+// or admin JWT). Mounted before socialRoutes (see mount comment below).
+const opsRoutes = require('./routes/opsRoutes');
 const authController = require('./controllers/authController');
 const { authenticateUser } = require('./middleware/auth');
 const { loginRateLimit } = require('./routes/authRoutes');
@@ -75,6 +78,12 @@ app.use('/api/patch', patchRoutes);
 app.use('/api', donutRoutes);
 // NEWS MODE: /api/news + /api/news/search (public; see newsRoutes.js).
 app.use('/api', newsRoutes);
+// MULTI-AGENT P1 — ops audit trail: POST/GET /api/ops/audit (internal key
+// or admin JWT; see opsRoutes.js). Mounted BEFORE socialRoutes on purpose —
+// same reason as donutRoutes above: socialRoutes' blanket
+// router.use(authenticateUser) would 401 the ops internal-key Bearer before
+// opsAuth ever runs.
+app.use('/api', opsRoutes);
 app.use('/api', socialRoutes);
 // PHASE E — serve uploaded social media (server-randomized filenames only).
 app.use('/uploads', express.static(path.join(__dirname, '..', 'public', 'uploads')));
