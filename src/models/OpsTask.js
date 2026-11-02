@@ -18,11 +18,20 @@ const OpsTaskSchema = new mongoose.Schema({
         default: 'queued'
     },
     assignee: { type: String, default: '', maxlength: 40 },
+    // MULTI-AGENT P2 — additive fields (P1 skeleton explicitly reserved these):
+    // dependencies — task ids this task waits on. A dependency in `failed`
+    // status makes this task visibly blocked (computed `blockedBy` in API).
+    dependsOn: {
+        type: [{ type: mongoose.Schema.Types.ObjectId, ref: 'OpsTask' }],
+        default: []
+    },
     gateRequired: { type: Boolean, default: false },
     gateVerdict: { type: String, enum: ['SHIP', 'DO-NOT-SHIP'], default: undefined },
     evidenceRefs: { type: [String], default: [] },
     createdUtc: { type: Date, default: Date.now },
-    updatedUtc: { type: Date, default: Date.now }
+    updatedUtc: { type: Date, default: Date.now },
+    // MULTI-AGENT P2 — set server-side when status first reaches done.
+    doneUtc: { type: Date, default: null }
 });
 
 OpsTaskSchema.index({ status: 1 });

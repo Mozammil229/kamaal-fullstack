@@ -2,6 +2,8 @@ const express = require('express');
 const crypto = require('crypto');
 const router = express.Router();
 const opsController = require('../controllers/opsController');
+// MULTI-AGENT P2 — task coordination routes (same auth + rate limit as P1).
+const opsTasksController = require('../controllers/opsTasksController');
 const { requireAdminAuth } = require('../middleware/auth');
 const env = require('../config/env');
 
@@ -53,5 +55,13 @@ function opsRateLimit(req, res, next) {
 
 router.post('/ops/audit', opsRateLimit, opsAuth, opsController.postAuditEvent);
 router.get('/ops/audit', opsRateLimit, opsAuth, opsController.getAuditEvents);
+
+// MULTI-AGENT P2 — task coordination (same opsAuth + opsRateLimit; the /api
+// mount stays BEFORE socialRoutes in app.js — untouched).
+router.post('/ops/tasks', opsRateLimit, opsAuth, opsTasksController.postTask);
+router.get('/ops/tasks', opsRateLimit, opsAuth, opsTasksController.getTasks);
+router.get('/ops/tasks/:id', opsRateLimit, opsAuth, opsTasksController.getTask);
+router.patch('/ops/tasks/:id', opsRateLimit, opsAuth, opsTasksController.patchTask);
+router.get('/ops/inbox/:agent', opsRateLimit, opsAuth, opsTasksController.getInbox);
 
 module.exports = router;
