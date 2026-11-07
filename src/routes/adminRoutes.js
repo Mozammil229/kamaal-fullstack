@@ -24,6 +24,16 @@ router.get('/payments/list', adminController.listPayments);
 router.post('/payments/review', adminController.reviewPayment);
 router.get('/keys/list', adminController.listKeys);
 router.post('/keys/create', adminController.createKeys);
+// KAMAAL API KEYS (2026-11-05) — provider pools + kml_ access tokens.
+// Separate namespace from the REDEEM voucher /keys/* above; do not merge.
+const apikeyAdminController = require('../controllers/apikeyAdminController');
+router.get('/apikeys/providers', apikeyAdminController.getProviders);
+router.post('/apikeys/provider-key', apikeyAdminController.addProviderKey);
+router.post('/apikeys/provider-key/revoke', apikeyAdminController.revokeProviderKey);
+router.post('/apikeys/kamaal-key', apikeyAdminController.createKamaalKey);
+router.get('/apikeys/kamaal-keys', apikeyAdminController.listKamaalKeys);
+router.post('/apikeys/kamaal-key/attach', apikeyAdminController.attachKamaalKey);
+router.post('/apikeys/kamaal-key/revoke', apikeyAdminController.revokeKamaalKey);
 router.post('/config/update', adminController.updateConfig);
 router.get('/crash-reports', crashReportController.listCrashReports);
 router.delete('/crash-reports/:id', crashReportController.deleteCrashReport);

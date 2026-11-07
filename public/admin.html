@@ -159,6 +159,9 @@
             <button onclick="switchTab('keysTab')" id="btnKeysTab" class="tab-btn px-4 py-2 rounded-xl text-xs font-bold transition text-gray-400 hover:text-white">
                 <i class="fa-solid fa-key mr-1.5"></i> VIP Vouchers
             </button>
+            <button onclick="switchTab('apiKeysTab')" id="btnApiKeysTab" class="tab-btn px-4 py-2 rounded-xl text-xs font-bold transition text-gray-400 hover:text-white">
+                <i class="fa-solid fa-plug-circle-bolt mr-1.5"></i> API Keys
+            </button>
             <button onclick="switchTab('broadcastTab')" id="btnBroadcastTab" class="tab-btn px-4 py-2 rounded-xl text-xs font-bold transition text-gray-400 hover:text-white">
                 <i class="fa-solid fa-bullhorn mr-1.5"></i> Mobile Notifications
             </button>
@@ -297,6 +300,71 @@
                     <div id="keysVaultContainer" class="space-y-2 max-h-96 overflow-y-auto custom-scroll text-xs">
                         <div class="text-center text-gray-500 py-6">Click refresh to inspect keys in database</div>
                     </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============================================================== -->
+        <!-- TAB: API KEYS — provider pools + Kamaal API keys (2026-11-05) -->
+        <!-- Keys are shown MASKED (last 4 chars only). A full provider key -->
+        <!-- is never returned after creation; a kml_ token is shown ONCE. -->
+        <!-- ============================================================== -->
+        <div id="apiKeysTab" class="hidden space-y-6">
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <!-- Gemini pool box -->
+                <div class="glass-card p-6 rounded-2xl border-t-2 border-t-cyan-500">
+                    <h3 class="text-base font-black text-cyan-400 mb-1">GEMINI POOL</h3>
+                    <p class="text-xs text-gray-400 mb-1">Working Gemini keys. The server rotates them for chat + API calls.</p>
+                    <p class="text-[11px] text-gray-500 mb-4" id="apkGeminiCounts">—</p>
+                    <form id="apkGeminiForm" class="flex gap-2 mb-4">
+                        <input type="password" id="apkGeminiKey" placeholder="Paste working Gemini key..." autocomplete="off" class="flex-1 min-w-0 bg-gray-900 border border-gray-700 rounded-xl px-3 py-2 text-xs text-white">
+                        <input type="text" id="apkGeminiLabel" placeholder="Label (optional)" class="w-28 bg-gray-900 border border-gray-700 rounded-xl px-3 py-2 text-xs text-white">
+                        <button type="submit" class="bg-cyan-500 hover:bg-cyan-400 text-black font-black px-3 py-2 rounded-xl text-xs transition">ADD</button>
+                    </form>
+                    <div id="apkGeminiTags" class="space-y-2 text-xs">
+                        <div class="text-center text-gray-500 py-4">Loading pool...</div>
+                    </div>
+                </div>
+                <!-- ChatGPT pool box (empty slot until owner supplies keys) -->
+                <div class="glass-card p-6 rounded-2xl border-t-2 border-t-emerald-500">
+                    <h3 class="text-base font-black text-emerald-400 mb-1">CHATGPT POOL</h3>
+                    <p class="text-xs text-gray-400 mb-1">Working ChatGPT keys. Empty slot until the owner supplies keys.</p>
+                    <p class="text-[11px] text-gray-500 mb-4" id="apkChatgptCounts">—</p>
+                    <form id="apkChatgptForm" class="flex gap-2 mb-4">
+                        <input type="password" id="apkChatgptKey" placeholder="Paste working ChatGPT key..." autocomplete="off" class="flex-1 min-w-0 bg-gray-900 border border-gray-700 rounded-xl px-3 py-2 text-xs text-white">
+                        <input type="text" id="apkChatgptLabel" placeholder="Label (optional)" class="w-28 bg-gray-900 border border-gray-700 rounded-xl px-3 py-2 text-xs text-white">
+                        <button type="submit" class="bg-emerald-500 hover:bg-emerald-400 text-black font-black px-3 py-2 rounded-xl text-xs transition">ADD</button>
+                    </form>
+                    <div id="apkChatgptTags" class="space-y-2 text-xs">
+                        <div class="text-center text-gray-500 py-4">Loading pool...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Kamaal API keys (kml_...) -->
+            <div class="glass-card p-6 rounded-2xl border-t-2 border-t-violet-500">
+                <div class="flex items-center justify-between mb-1">
+                    <h3 class="text-base font-black text-white">KAMAAL API KEYS</h3>
+                    <button onclick="loadApiKeys()" class="glass-card hover:bg-gray-800 px-3 py-1.5 rounded-xl text-xs text-gray-300 font-bold transition">
+                        <i class="fa-solid fa-rotate mr-1"></i> Refresh
+                    </button>
+                </div>
+                <p class="text-xs text-gray-400 mb-4">Issue <span class="font-mono text-violet-300">kml_...</span> keys for outside use of POST /api/v1/chat. Each call costs the attached user 1 credit (checked before serving). Attach a key to a user to activate it.</p>
+                <form id="apkIssueForm" class="flex flex-wrap gap-2 mb-4">
+                    <input type="text" id="apkIssueUser" placeholder="@username (attach now, or leave blank)" class="flex-1 min-w-0 bg-gray-900 border border-gray-700 rounded-xl px-3 py-2 text-xs text-white">
+                    <select id="apkIssueTier" class="bg-gray-900 border border-gray-700 rounded-xl px-3 py-2 text-xs text-white">
+                        <option value="basic">Gemini Basic</option>
+                        <option value="advance">Gemini Advance</option>
+                    </select>
+                    <button type="submit" class="bg-violet-500 hover:bg-violet-400 text-black font-black px-4 py-2 rounded-xl text-xs transition">ISSUE KEY</button>
+                </form>
+                <div id="apkIssuedBox" class="hidden mb-4 p-3 bg-gray-950/80 rounded-xl border border-violet-500/50 text-[11px]">
+                    <div class="text-violet-300 font-bold mb-1">COPY NOW — this full key is shown once and never again:</div>
+                    <div class="font-mono text-emerald-400 break-all" id="apkIssuedToken"></div>
+                    <button onclick="document.getElementById('apkIssuedBox').classList.add('hidden'); document.getElementById('apkIssuedToken').textContent='';" class="mt-2 px-3 py-1 rounded-lg bg-gray-800 text-gray-300 text-[11px] font-bold">Hide</button>
+                </div>
+                <div id="apkKamaalList" class="space-y-2 text-xs">
+                    <div class="text-center text-gray-500 py-4">Loading keys...</div>
                 </div>
             </div>
         </div>
@@ -897,7 +965,7 @@
 
         // Tab Switching
         function switchTab(tabId) {
-            ['usersTab', 'broadcastTab', 'chatsTab', 'paymentsTab', 'keysTab', 'remoteTab', 'crashReportsTab'].forEach(id => {
+            ['usersTab', 'broadcastTab', 'chatsTab', 'paymentsTab', 'keysTab', 'apiKeysTab', 'remoteTab', 'crashReportsTab'].forEach(id => {
                 document.getElementById(id).classList.add('hidden');
             });
             document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -912,6 +980,7 @@
 
             if (tabId === 'paymentsTab') loadPayments();
             if (tabId === 'keysTab') loadKeysVault();
+            if (tabId === 'apiKeysTab') loadApiKeys();
             if (tabId === 'remoteTab') loadRemoteConfig();
             if (tabId === 'crashReportsTab') loadCrashReports();
         }
@@ -1768,6 +1837,157 @@
             } catch (e) {
                 vault.innerHTML = `<div class="text-rose-400 py-4 text-center">Error loading vault: ${e.message}</div>`;
             }
+        }
+
+        // ===== API KEYS TAB (Kamaal API track, 2026-11-05) =====
+        // Display rule: only last4 ever comes from the server. A full kml_
+        // token appears only in the single create response, shown once.
+        function apkEsc(s) {
+            return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        }
+
+        async function loadApiKeys() {
+            try {
+                const res = await fetch('/api/admin/apikeys/providers', { headers: getAuthHeaders() });
+                const data = await res.json();
+                if (!data.success) throw new Error(data.error || 'Failed to load providers');
+                for (const p of data.providers) {
+                    const box = p.provider === 'gemini'
+                        ? { counts: 'apkGeminiCounts', tags: 'apkGeminiTags' }
+                        : { counts: 'apkChatgptCounts', tags: 'apkChatgptTags' };
+                    document.getElementById(box.counts).textContent =
+                        `Env keys: ${p.envKeyCount} • Pool keys: ${p.dbKeyCount} (active ${p.activeDbKeyCount})` +
+                        (p.encryptionConfigured ? '' : ' • ENCRYPTION NOT CONFIGURED — adding keys is disabled until APIKEY_ENCRYPTION_KEY is set in Vercel env');
+                    const el = document.getElementById(box.tags);
+                    if (!p.keys || p.keys.length === 0) {
+                        el.innerHTML = p.provider === 'chatgpt'
+                            ? '<div class="text-center text-gray-500 py-4">No keys yet — the owner will supply working ChatGPT keys.</div>'
+                            : '<div class="text-center text-gray-500 py-4">No pool keys yet. Env keys still serve.</div>';
+                    } else {
+                        el.innerHTML = p.keys.map(k => `
+                            <div class="p-2.5 bg-gray-900 rounded-xl border ${k.status === 'revoked' ? 'border-gray-800 opacity-60' : 'border-cyan-500/40'} flex items-center justify-between gap-2">
+                                <div class="min-w-0">
+                                    <span class="font-mono text-white font-bold">****${apkEsc(k.last4.slice(-4))}</span>
+                                    ${k.label ? `<span class="text-gray-400"> • ${apkEsc(k.label)}</span>` : ''}
+                                    <span class="text-[10px] text-gray-400 block">Used ${k.usageCount}×${k.lastUsedAt ? ' • last ' + new Date(k.lastUsedAt).toLocaleString() : ''}</span>
+                                </div>
+                                ${k.status === 'active'
+                                    ? `<button onclick="apkRevokeProvider('${k.id}')" class="shrink-0 px-2 py-1 rounded-lg bg-rose-500/20 text-rose-300 text-[11px] font-bold">Revoke</button>`
+                                    : `<span class="px-2 py-0.5 rounded text-[10px] uppercase font-bold bg-gray-800 text-gray-400">Revoked</span>`}
+                            </div>`).join('');
+                    }
+                }
+            } catch (e) {
+                document.getElementById('apkGeminiTags').innerHTML = `<div class="text-rose-400 py-4 text-center">Error: ${apkEsc(e.message)}</div>`;
+                document.getElementById('apkChatgptTags').innerHTML = '';
+            }
+            try {
+                const res = await fetch('/api/admin/apikeys/kamaal-keys', { headers: getAuthHeaders() });
+                const data = await res.json();
+                const list = document.getElementById('apkKamaalList');
+                if (!data.success) throw new Error(data.error || 'Failed to load Kamaal keys');
+                if (!data.keys || data.keys.length === 0) {
+                    list.innerHTML = '<div class="text-center text-gray-500 py-4">No Kamaal API keys issued yet.</div>';
+                } else {
+                    list.innerHTML = data.keys.map(k => `
+                        <div class="p-2.5 bg-gray-900 rounded-xl border ${k.status === 'revoked' ? 'border-gray-800 opacity-60' : 'border-violet-500/40'} flex flex-wrap items-center justify-between gap-2">
+                            <div class="min-w-0">
+                                <span class="font-mono text-white font-bold">${apkEsc(k.displayId)}</span>
+                                <span class="text-gray-400"> • ${k.tier === 'advance' ? 'Gemini Advance' : 'Gemini Basic'}</span>
+                                <span class="text-[10px] text-gray-400 block">${k.ownerUsername ? 'Attached to @' + apkEsc(k.ownerUsername) : 'UNATTACHED — attach to activate'} • ${k.callsUsed} calls</span>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <input type="text" placeholder="@username" value="${apkEsc(k.ownerUsername)}" id="apkAttach-${apkEsc(k.id)}" class="w-32 bg-gray-950 border border-gray-700 rounded-lg px-2 py-1.5 text-[11px] text-white">
+                                <button onclick="apkAttachKamaal('${apkEsc(k.id)}')" class="px-2 py-1.5 rounded-lg bg-violet-500/20 text-violet-300 text-[11px] font-bold">Attach</button>
+                                ${k.status === 'active'
+                                    ? `<button onclick="apkRevokeKamaal('${apkEsc(k.id)}')" class="px-2 py-1.5 rounded-lg bg-rose-500/20 text-rose-300 text-[11px] font-bold">Revoke</button>`
+                                    : `<span class="px-2 py-0.5 rounded text-[10px] uppercase font-bold bg-gray-800 text-gray-400">Revoked</span>`}
+                            </div>
+                        </div>`).join('');
+                }
+            } catch (e) {
+                document.getElementById('apkKamaalList').innerHTML = `<div class="text-rose-400 py-4 text-center">Error: ${apkEsc(e.message)}</div>`;
+            }
+        }
+
+        async function apkAddProvider(provider) {
+            const keyEl = document.getElementById(provider === 'gemini' ? 'apkGeminiKey' : 'apkChatgptKey');
+            const labelEl = document.getElementById(provider === 'gemini' ? 'apkGeminiLabel' : 'apkChatgptLabel');
+            const key = keyEl.value.trim();
+            if (!key) { alert('Paste a working provider key first.'); return; }
+            try {
+                const res = await fetch('/api/admin/apikeys/provider-key', {
+                    method: 'POST', headers: getAuthHeaders(),
+                    body: JSON.stringify({ provider, key, label: labelEl.value.trim() })
+                });
+                const data = await res.json();
+                if (!data.success) { alert(data.error || 'Failed to add key'); return; }
+                keyEl.value = ''; labelEl.value = '';
+                alert(`Key ****${data.last4.slice(-4)} added to the ${provider} pool. It will never be shown again.`);
+                loadApiKeys();
+            } catch (e) { alert(e.message); }
+        }
+
+        document.getElementById('apkGeminiForm').addEventListener('submit', (e) => { e.preventDefault(); apkAddProvider('gemini'); });
+        document.getElementById('apkChatgptForm').addEventListener('submit', (e) => { e.preventDefault(); apkAddProvider('chatgpt'); });
+
+        async function apkRevokeProvider(id) {
+            if (!confirm('Revoke this pool key? It will stop being used immediately.')) return;
+            try {
+                const res = await fetch('/api/admin/apikeys/provider-key/revoke', {
+                    method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ id })
+                });
+                const data = await res.json();
+                if (!data.success) { alert(data.error || 'Failed to revoke'); return; }
+                loadApiKeys();
+            } catch (e) { alert(e.message); }
+        }
+
+        document.getElementById('apkIssueForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const ownerUsername = document.getElementById('apkIssueUser').value.trim().replace(/^@/, '');
+            const tier = document.getElementById('apkIssueTier').value;
+            try {
+                const res = await fetch('/api/admin/apikeys/kamaal-key', {
+                    method: 'POST', headers: getAuthHeaders(),
+                    body: JSON.stringify({ ownerUsername, tier })
+                });
+                const data = await res.json();
+                if (!data.success) { alert(data.error || 'Failed to issue key'); return; }
+                const box = document.getElementById('apkIssuedBox');
+                document.getElementById('apkIssuedToken').textContent = data.token;
+                box.classList.remove('hidden');
+                document.getElementById('apkIssueUser').value = '';
+                loadApiKeys();
+            } catch (err) { alert(err.message); }
+        });
+
+        async function apkAttachKamaal(rowId) {
+            const input = document.getElementById('apkAttach-' + rowId);
+            const ownerUsername = (input ? input.value : '').trim().replace(/^@/, '');
+            if (!ownerUsername) { alert('Enter a @username to attach.'); return; }
+            try {
+                const res = await fetch('/api/admin/apikeys/kamaal-key/attach', {
+                    method: 'POST', headers: getAuthHeaders(),
+                    body: JSON.stringify({ id: rowId, ownerUsername })
+                });
+                const data = await res.json();
+                if (!data.success) { alert(data.error || 'Failed to attach'); return; }
+                loadApiKeys();
+            } catch (e) { alert(e.message); }
+        }
+
+        async function apkRevokeKamaal(rowId) {
+            if (!confirm('Revoke this Kamaal API key? Outside calls with it will stop working.')) return;
+            try {
+                const res = await fetch('/api/admin/apikeys/kamaal-key/revoke', {
+                    method: 'POST', headers: getAuthHeaders(),
+                    body: JSON.stringify({ id: rowId })
+                });
+                const data = await res.json();
+                if (!data.success) { alert(data.error || 'Failed to revoke'); return; }
+                loadApiKeys();
+            } catch (e) { alert(e.message); }
         }
     </script>
     <!-- PHASE C: admin Chats module (1-to-1 threads + broadcast composer) -->

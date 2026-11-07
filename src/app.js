@@ -9,6 +9,8 @@ const chatRoutes = require('./routes/chatRoutes');
 const aiRoutes = require('./routes/aiRoutes');
 const userRoutes = require('./routes/userRoutes');
 const adminRoutes = require('./routes/adminRoutes');
+// Kamaal API track (2026-11-05): public API, kml_ key auth, credit-gated.
+const kamaalApiRoutes = require('./routes/kamaalApiRoutes');
 const onlineToolRoutes = require('./routes/onlineToolRoutes');
 // PHASE C — Admin messaging (blueprint §6/§7).
 const messageRoutes = require('./routes/messageRoutes');
@@ -62,6 +64,7 @@ app.use('/api', chatRoutes);
 app.use('/api', aiRoutes);
 app.use('/api', userRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/v1', kamaalApiRoutes);
 app.use('/api', onlineToolRoutes);
 // PHASE B — Kamal ID device identity (matches the /api/* convention).
 app.use('/api/device', deviceRoutes);

@@ -1,5 +1,10 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const env = require('../config/env');
+// Kamaal API track (2026-11-05): the pool merges env keys with admin-added
+// DB pool keys. Env-only behaviour is preserved when the DB/encryption is
+// unavailable, so chat never breaks over pool admin.
+const pool = require('./providerKeyPool');
+const apikeyCrypto = require('./apikeyCrypto');
 
 const rawGeminiEnvKeys = [
     env.GEMINI_API_KEY,
@@ -70,6 +75,8 @@ async function generateWithKeys(keys, message, systemInstruction, modelName = 'g
                 const reply = result.response.text();
                 if (reply && reply.trim()) {
                     keyIndex = (keyIndex + k) % keys.length;
+                    // Best-effort pool usage accounting (no-op for env keys).
+                    pool.recordKeyUse('gemini', apikeyCrypto.sha256(candidateKey)).catch(() => {});
                     return reply.trim();
                 }
                 attemptErrors.push(`${mName}: empty reply`);
@@ -108,7 +115,9 @@ async function generateWithKeys(keys, message, systemInstruction, modelName = 'g
 }
 
 async function generateWithKeyPool(message, systemInstruction, modelName) {
-    return generateWithKeys(GEMINI_KEYS, message, systemInstruction, modelName);
+    // Kamaal API track: env keys + admin-added DB pool keys (deduped).
+    const keys = await pool.getPoolKeys('gemini');
+    return generateWithKeys(keys, message, systemInstruction, modelName);
 }
 
 // LEGACY SIGNATURE (kept for caller compatibility): since Round 2
@@ -122,8 +131,14 @@ async function generateWithUserKeyFirst(userKey, message, systemInstruction, mod
 module.exports = {
     generateWithKeyPool,
     generateWithUserKeyFirst,
+    // Kamaal API track (2026-11-05): BYOK on the NEW /api/v1 surface only.
+    // The caller supplies their own Gemini key first; pool keys follow.
+    // /api/chat never uses this export (BYOK stays retired there).
+    generateWithKeys,
     // VOXPILOT PHASE 2 (v58): Live ephemeral-token minting needs the pool
     // order (primary first). Returns a copy; never logs keys.
+    // Kamaal API track: Live KEEPS the sync env-only path on purpose —
+    // DB pool keys serve chat/API only; no Live behaviour change.
     getGeminiKeys: () => GEMINI_KEYS.slice(),
     hasConfiguredKeys: () => GEMINI_KEYS.length > 0
 };
