@@ -310,6 +310,18 @@
         <!-- is never returned after creation; a kml_ token is shown ONCE. -->
         <!-- ============================================================== -->
         <div id="apiKeysTab" class="hidden space-y-6">
+            <!-- Encryption key (panel-based, 2026-11-08) — set INSIDE this panel, NOT in Vercel -->
+            <div class="glass-card p-6 rounded-2xl border-t-2 border-t-amber-500">
+                <h3 class="text-base font-black text-amber-400 mb-1">ENCRYPTION KEY</h3>
+                <p class="text-xs text-gray-400 mb-1">Provider keys (Gemini / ChatGPT) are stored encrypted. This key locks them — the server never shows it again after you set it.</p>
+                <p class="text-[11px] text-gray-500 mb-4" id="encKeyStatus">—</p>
+                <div class="flex flex-wrap gap-2 mb-2">
+                    <button id="encKeyGenerateBtn" onclick="encKeyGenerate()" class="bg-amber-500 hover:bg-amber-400 text-black font-black px-4 py-2 rounded-xl text-xs transition">GENERATE</button>
+                    <input type="password" id="encKeyPaste" placeholder="...or paste a 64-hex / base64 key" autocomplete="off" class="flex-1 min-w-0 bg-gray-900 border border-gray-700 rounded-xl px-3 py-2 text-xs text-white">
+                    <button id="encKeySaveBtn" onclick="encKeySave()" class="bg-gray-800 hover:bg-gray-700 text-white font-black px-4 py-2 rounded-xl text-xs transition">SAVE</button>
+                </div>
+                <p class="text-[11px] text-gray-500" id="encKeyMsg"></p>
+            </div>
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <!-- Gemini pool box -->
                 <div class="glass-card p-6 rounded-2xl border-t-2 border-t-cyan-500">
@@ -1846,7 +1858,67 @@
             return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
         }
 
+        // ===== ENCRYPTION KEY (panel-based, 2026-11-08) =====
+        // The key is set INSIDE this panel — Generate (server-side random)
+        // or paste. The server NEVER returns the key value; status only
+        // says whether it is set and where it came from (env / panel).
+        function encKeySetMsg(text, isError) {
+            const el = document.getElementById('encKeyMsg');
+            el.textContent = text;
+            el.className = 'text-[11px] ' + (isError ? 'text-rose-400' : 'text-emerald-400');
+        }
+
+        async function loadEncKeyStatus() {
+            const statusEl = document.getElementById('encKeyStatus');
+            const genBtn = document.getElementById('encKeyGenerateBtn');
+            const pasteEl = document.getElementById('encKeyPaste');
+            const saveBtn = document.getElementById('encKeySaveBtn');
+            try {
+                const res = await fetch('/api/admin/apikeys/encryption-key/status', { headers: getAuthHeaders() });
+                const data = await res.json();
+                if (!data.success) throw new Error(data.error || 'Failed to load encryption status');
+                const envSet = data.source === 'env';
+                statusEl.textContent = !data.configured
+                    ? 'Not set yet — provider keys cannot be added until you Generate or paste a key below.'
+                    : envSet
+                        ? 'Set in the server env (Vercel) — panel key not needed, inputs below are off.'
+                        : 'Set from this panel — provider keys can be added below.';
+                genBtn.disabled = envSet; pasteEl.disabled = envSet; saveBtn.disabled = envSet;
+                genBtn.classList.toggle('opacity-40', envSet);
+                saveBtn.classList.toggle('opacity-40', envSet);
+            } catch (e) {
+                statusEl.textContent = 'Status could not be loaded: ' + e.message;
+            }
+        }
+
+        async function encKeyPost(body) {
+            const res = await fetch('/api/admin/apikeys/encryption-key', {
+                method: 'POST', headers: getAuthHeaders(), body: JSON.stringify(body)
+            });
+            const data = await res.json();
+            if (!data.success) { encKeySetMsg(data.error || 'Failed to set key', true); return; }
+            document.getElementById('encKeyPaste').value = '';
+            encKeySetMsg('Key set ho gayi — ye kabhi dikhayi nahi jayegi.'
+                + (data.replaced ? ' Purani key badal gayi — purane pool keys dobara add karne honge (wo purani key se lock thay).' : ''), false);
+            loadEncKeyStatus();
+            loadApiKeys();
+        }
+
+        async function encKeyGenerate() {
+            if (!confirm('Generate a new encryption key on the server? It is never shown — not even once.')) return;
+            encKeySetMsg('Generating...', false);
+            try { await encKeyPost({ generate: true }); } catch (e) { encKeySetMsg(e.message, true); }
+        }
+
+        async function encKeySave() {
+            const value = document.getElementById('encKeyPaste').value.trim();
+            if (!value) { encKeySetMsg('Pehle key paste karo, ya GENERATE dabao.', true); return; }
+            encKeySetMsg('Saving...', false);
+            try { await encKeyPost({ key: value }); } catch (e) { encKeySetMsg(e.message, true); }
+        }
+
         async function loadApiKeys() {
+            loadEncKeyStatus();
             try {
                 const res = await fetch('/api/admin/apikeys/providers', { headers: getAuthHeaders() });
                 const data = await res.json();
@@ -1857,7 +1929,7 @@
                         : { counts: 'apkChatgptCounts', tags: 'apkChatgptTags' };
                     document.getElementById(box.counts).textContent =
                         `Env keys: ${p.envKeyCount} • Pool keys: ${p.dbKeyCount} (active ${p.activeDbKeyCount})` +
-                        (p.encryptionConfigured ? '' : ' • ENCRYPTION NOT CONFIGURED — adding keys is disabled until APIKEY_ENCRYPTION_KEY is set in Vercel env');
+                        (p.encryptionConfigured ? '' : ' • ENCRYPTION NOT CONFIGURED — set it from the Encryption key box above');
                     const el = document.getElementById(box.tags);
                     if (!p.keys || p.keys.length === 0) {
                         el.innerHTML = p.provider === 'chatgpt'

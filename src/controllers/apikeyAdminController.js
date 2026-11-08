@@ -59,11 +59,13 @@ async function addProviderKey(req, res) {
     if (plain.length < 10) {
         return res.status(400).json({ success: false, error: 'A working provider key is required (min 10 chars).' });
     }
+    // Warm the panel-key cache (no-op when the env key is set).
+    await apikeyCrypto.ensurePanelKeyLoaded();
     if (!apikeyCrypto.isConfigured()) {
         return res.status(503).json({
             success: false,
             code: 'APIKEY_ENC_NOT_CONFIGURED',
-            error: 'APIKEY_ENCRYPTION_KEY is not set on the server. Set it in Vercel env first — provider keys are never stored unencrypted.'
+            error: 'Encryption is not set up yet. Set the encryption key from the "Encryption key" box in the API Keys tab of this admin panel — provider keys are never stored unencrypted.'
         });
     }
     const keyHash = apikeyCrypto.sha256(plain);
@@ -228,5 +230,71 @@ module.exports = {
     createKamaalKey,
     listKamaalKeys,
     attachKamaalKey,
-    revokeKamaalKey
+    revokeKamaalKey,
+    getEncryptionKeyStatus,
+    setEncryptionKey
 };
+
+// ---- PANEL-STORED ENCRYPTION KEY (2026-11-08) -------------------------
+// The encryption key for provider pool keys is set INSIDE this admin
+// panel — NOT in the Vercel dashboard (user order 2026-11-08).
+//   GET  /api/admin/apikeys/encryption-key/status
+//        -> { success, configured, source: 'env' | 'panel' | null }
+//        NEVER returns the key itself.
+//   POST /api/admin/apikeys/encryption-key  { generate: true }
+//        | { key: "<64 hex | base64 of 32 bytes>" }
+//        -> { success, configured, source: 'panel', replaced: bool }
+//        The key value is NEVER returned, logged, or echoed back.
+// Env precedence: when APIKEY_ENCRYPTION_KEY is set in env, the panel
+// input is refused (409) — the env key already does the job and a panel
+// key would sit dormant and confuse. Remove the env var first to switch.
+
+async function getEncryptionKeyStatus(req, res) {
+    await connectToDatabase();
+    await apikeyCrypto.ensurePanelKeyLoaded();
+    return res.json({
+        success: true,
+        configured: apikeyCrypto.isConfigured(),
+        source: apikeyCrypto.getKeySource()
+    });
+}
+
+async function setEncryptionKey(req, res) {
+    await connectToDatabase();
+    const { key, generate } = req.body || {};
+    await apikeyCrypto.ensurePanelKeyLoaded();
+    if (apikeyCrypto.getKeySource() === 'env') {
+        return res.status(409).json({
+            success: false,
+            code: 'ENC_KEY_ENV_SET',
+            error: 'Encryption key is already set in the server env (Vercel) — the panel key is not needed. Remove the env var first if you want the panel key to take over.'
+        });
+    }
+    let keyBuf = null;
+    if (generate === true) {
+        keyBuf = crypto.randomBytes(32);
+    } else {
+        keyBuf = apikeyCrypto.parseKeyInput(key);
+        if (!keyBuf) {
+            return res.status(400).json({
+                success: false,
+                code: 'INVALID_ENCRYPTION_KEY',
+                error: 'Key must be 64 hex characters, or base64 of exactly 32 bytes.'
+            });
+        }
+    }
+    try {
+        const { replaced } = await apikeyCrypto.storePanelKey(keyBuf, adminName(req));
+        await audit(adminName(req), 'apikey.encryption_key.set', replaced ? 'replaced' : 'new');
+        return res.json({ success: true, configured: true, source: 'panel', replaced });
+    } catch (e) {
+        if (e && e.message === 'PANEL_KEY_UNAVAILABLE') {
+            return res.status(503).json({
+                success: false,
+                code: 'PANEL_KEY_UNAVAILABLE',
+                error: 'Panel key storage needs ADMIN_PASS set in the server env (it wraps the key). Ask the server owner to set it, then try again.'
+            });
+        }
+        return res.status(500).json({ success: false, error: e.message });
+    }
+}

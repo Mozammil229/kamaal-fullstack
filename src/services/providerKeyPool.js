@@ -31,6 +31,8 @@ function envGeminiKeys() {
 
 async function loadDbKeys(provider) {
     if (!isDbConnected()) return [];
+    // Warm the panel-key cache (no-op when env key is set or already loaded).
+    await apikeyCrypto.ensurePanelKeyLoaded();
     if (!apikeyCrypto.isConfigured()) return [];
     let rows;
     try {
@@ -86,6 +88,9 @@ async function listPoolStatus(provider) {
     const envCount = provider === 'gemini' ? envGeminiKeys().length : 0;
     let dbRows = [];
     if (isDbConnected()) {
+        // Warm the panel-key cache so encryptionConfigured reflects a
+        // panel-set key even on a cold server instance.
+        await apikeyCrypto.ensurePanelKeyLoaded();
         try {
             dbRows = await ProviderApiKey.find({ provider }).sort({ createdAt: -1 }).lean();
         } catch (e) {

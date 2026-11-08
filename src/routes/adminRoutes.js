@@ -34,6 +34,10 @@ router.post('/apikeys/kamaal-key', apikeyAdminController.createKamaalKey);
 router.get('/apikeys/kamaal-keys', apikeyAdminController.listKamaalKeys);
 router.post('/apikeys/kamaal-key/attach', apikeyAdminController.attachKamaalKey);
 router.post('/apikeys/kamaal-key/revoke', apikeyAdminController.revokeKamaalKey);
+// PANEL-STORED ENCRYPTION KEY (2026-11-08) — set inside this admin panel,
+// not in the Vercel dashboard. The key value is never returned or logged.
+router.get('/apikeys/encryption-key/status', apikeyAdminController.getEncryptionKeyStatus);
+router.post('/apikeys/encryption-key', apikeyAdminController.setEncryptionKey);
 router.post('/config/update', adminController.updateConfig);
 router.get('/crash-reports', crashReportController.listCrashReports);
 router.delete('/crash-reports/:id', crashReportController.deleteCrashReport);
