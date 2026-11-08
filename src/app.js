@@ -18,6 +18,8 @@ const messageRoutes = require('./routes/messageRoutes');
 const crashReportRoutes = require('./routes/crashReportRoutes');
 // v66 — Wink AI video enhance (stateless JSON proxy; server never gets video bytes).
 const winkRoutes = require('./routes/winkRoutes');
+// S5 C1 PROBE — TEMPORARY route (delete once C1 is decided).
+const subtitleProbeRoutes = require('./routes/subtitleProbeRoutes');
 // Donut feed (YouTube Data API nightly cache): GET /api/donut/feed,
 // GET|POST /api/donut/refresh (Vercel Cron secret or admin auth).
 const donutRoutes = require('./routes/donutRoutes');
@@ -87,6 +89,11 @@ app.use('/api', newsRoutes);
 // router.use(authenticateUser) would 401 the ops internal-key Bearer before
 // opsAuth ever runs.
 app.use('/api', opsRoutes);
+// S5 C1 PROBE — TEMPORARY (delete once C1 is decided). Mounted BEFORE
+// socialRoutes on purpose: socialRoutes' blanket router.use(authenticateUser)
+// would 401 the admin x-admin-key Bearer before requireAdminAuth ever runs
+// (same trap as donut/news/ops — see their mount comments).
+app.use('/api', subtitleProbeRoutes);
 app.use('/api', socialRoutes);
 // PHASE E — serve uploaded social media (server-randomized filenames only).
 app.use('/uploads', express.static(path.join(__dirname, '..', 'public', 'uploads')));
