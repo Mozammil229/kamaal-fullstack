@@ -265,7 +265,7 @@ async function transcribeFile(apiKey, fileUri, fetchImpl, signal) {
         },
         body: JSON.stringify({
             model: `models/${PROBE_MODEL}`,
-            input: [{ type: 'file', file_uri: fileUri }],
+            input: [{ type: 'audio', file_uri: fileUri }],
             generation_config: {
                 transcription_config: {
                     mode: { type: 'verbatim', timestamp_granularities: ['word'] }
