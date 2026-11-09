@@ -57,7 +57,7 @@
     </div>
 
     <!-- Master Container -->
-    <div class="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+    <div id="appAdminView" class="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
 
         <!-- ============================================================== -->
         <!-- 1. HEADER & LIVE RADAR STATUS -->
@@ -908,6 +908,73 @@
     </div>
 
     <!-- ============================================================== -->
+    <!-- PANEL CHOOSER — App admin vs Patcher Site admin (2026-11-09) -->
+    <!-- Shown after admin login. The App section above is untouched; -->
+    <!-- the Site section manages patcher-site web users only. -->
+    <!-- ============================================================== -->
+    <div id="panelChooser" class="fixed inset-0 z-50 bg-black/95 backdrop-blur-xl flex items-center justify-center p-4 hidden">
+        <div class="w-full max-w-2xl text-center">
+            <h2 class="text-xl font-black text-white">CHOOSE PANEL</h2>
+            <p class="text-xs text-gray-400 mt-1 mb-6">Kamaal App admin ya Patcher Site admin — jis ka kaam hai, usay kholo.</p>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-left">
+                <button onclick="openAppAdmin()" class="glass-card rounded-2xl p-6 border border-red-500/30 crimson-glow text-left hover:bg-gray-800/60 transition">
+                    <div class="text-2xl mb-2">👑</div>
+                    <div class="text-base font-black text-white">App</div>
+                    <p class="text-xs text-gray-400 mt-1">Kamaal App admin — users, payments, keys, chats, remote control. Pehle jaisa hi hai.</p>
+                    <div class="mt-4 text-xs font-black text-red-400">OPEN APP ADMIN →</div>
+                </button>
+                <button onclick="openSiteAdmin()" class="glass-card rounded-2xl p-6 border border-sky-500/30 text-left hover:bg-gray-800/60 transition">
+                    <div class="text-2xl mb-2">🌐</div>
+                    <div class="text-base font-black text-white">Site</div>
+                    <p class="text-xs text-gray-400 mt-1">Patcher Site admin — web users (register/login wale), list, disable, delete.</p>
+                    <div class="mt-4 text-xs font-black text-sky-400">OPEN SITE ADMIN →</div>
+                </button>
+            </div>
+            <button onclick="logoutAdmin()" class="mt-6 text-xs text-gray-500 hover:text-white font-bold">Logout</button>
+        </div>
+    </div>
+
+    <!-- ============================================================== -->
+    <!-- SITE ADMIN VIEW — patcher-site web users (2026-11-09) -->
+    <!-- ============================================================== -->
+    <div id="siteAdminView" class="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 hidden">
+        <header class="flex flex-col md:flex-row md:items-center justify-between pb-6 border-b border-gray-800/80 gap-4">
+            <div>
+                <h1 class="text-xl sm:text-2xl font-black tracking-tight text-white">PATCHER SITE — WEB USERS</h1>
+                <p class="text-xs text-gray-400 font-medium">Site par register/login karne wale web users. App users se alag hain.</p>
+            </div>
+            <div class="flex items-center space-x-2">
+                <button onclick="loadWebUsers()" class="glass-card hover:bg-gray-800 px-3 py-2 rounded-xl text-xs text-gray-300 font-bold transition"><i class="fa-solid fa-rotate mr-1"></i> Refresh</button>
+                <button onclick="showPanelChooser()" class="glass-card hover:bg-gray-800 px-3 py-2 rounded-xl text-xs text-gray-300 font-bold transition">← Panels</button>
+                <button onclick="logoutAdmin()" class="glass-card hover:bg-red-500/20 px-3 py-2 rounded-xl text-xs text-red-300 font-bold transition border border-red-500/30">Logout</button>
+            </div>
+        </header>
+        <div class="mt-4 flex flex-col sm:flex-row gap-3">
+            <input type="text" id="webUserSearchInput" oninput="renderWebUsers()" placeholder="Search by email..." class="flex-1 bg-gray-900/90 border border-gray-800 rounded-xl px-3 py-2 text-xs text-gray-200 focus:outline-none">
+            <span id="webUsersCount" class="text-xs text-gray-400 self-center">—</span>
+        </div>
+        <p id="webUsersMsg" class="text-xs text-gray-500 mt-3 hidden"></p>
+        <div class="glass-card rounded-2xl overflow-hidden border border-gray-800/80 mt-3">
+            <div class="overflow-x-auto custom-scroll">
+                <table class="w-full text-left text-xs">
+                    <thead>
+                        <tr class="border-b border-gray-800/80 text-gray-400">
+                            <th class="px-4 py-3 font-bold">Email</th>
+                            <th class="px-4 py-3 font-bold">Status</th>
+                            <th class="px-4 py-3 font-bold">Created</th>
+                            <th class="px-4 py-3 font-bold">Last login</th>
+                            <th class="px-4 py-3 font-bold text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="webUsersTableBody" class="divide-y divide-gray-800/60 font-medium">
+                        <tr><td colspan="5" class="px-4 py-8 text-center text-gray-500">Loading web users...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============================================================== -->
     <!-- 4. JAVASCRIPT LOGIC & 2-SECOND LIVE RADAR SYNC -->
     <!-- ============================================================== -->
     <script>
@@ -928,8 +995,7 @@
         // Initialize Authentication on load
         window.addEventListener('DOMContentLoaded', () => {
             if (localStorage.getItem('kammal_admin_authed') === 'true' && adminAuthToken) {
-                document.getElementById('loginOverlay').classList.add('hidden');
-                startLiveRadar();
+                showPanelChooser();
             }
         });
 
@@ -950,9 +1016,8 @@
                     adminAuthToken = data.token;
                     localStorage.setItem('kammal_admin_token', adminAuthToken);
                     localStorage.setItem('kammal_admin_authed', 'true');
-                    document.getElementById('loginOverlay').classList.add('hidden');
                     document.getElementById('loginError').classList.add('hidden');
-                    startLiveRadar();
+                    showPanelChooser();
                 } else {
                     document.getElementById('loginError').innerText = data.error || 'Authentication failed';
                     document.getElementById('loginError').classList.remove('hidden');
@@ -973,6 +1038,113 @@
             localStorage.removeItem('kammal_admin_authed');
             localStorage.removeItem('kammal_admin_token');
             location.reload();
+        }
+
+        // Panel chooser (2026-11-09) — App admin vs Patcher Site admin.
+        // The App section is untouched: openAppAdmin() only shows the
+        // existing dashboard and starts the existing live radar.
+        function stopLiveRadar() {
+            if (radarInterval) { clearInterval(radarInterval); radarInterval = null; }
+        }
+
+        function showPanelChooser() {
+            stopLiveRadar();
+            document.getElementById('loginOverlay').classList.add('hidden');
+            document.getElementById('appAdminView').classList.add('hidden');
+            document.getElementById('siteAdminView').classList.add('hidden');
+            document.getElementById('panelChooser').classList.remove('hidden');
+        }
+
+        function openAppAdmin() {
+            document.getElementById('panelChooser').classList.add('hidden');
+            document.getElementById('siteAdminView').classList.add('hidden');
+            document.getElementById('appAdminView').classList.remove('hidden');
+            startLiveRadar();
+        }
+
+        function openSiteAdmin() {
+            stopLiveRadar();
+            document.getElementById('panelChooser').classList.add('hidden');
+            document.getElementById('appAdminView').classList.add('hidden');
+            document.getElementById('siteAdminView').classList.remove('hidden');
+            loadWebUsers();
+        }
+
+        // Site admin — patcher-site web users (2026-11-09).
+        let allWebUsersData = [];
+
+        async function loadWebUsers() {
+            const msg = document.getElementById('webUsersMsg');
+            try {
+                const res = await fetch('/api/web/admin/users', { headers: getAuthHeaders() });
+                const data = await res.json();
+                if (data.success) {
+                    allWebUsersData = data.users || [];
+                    msg.classList.add('hidden');
+                    renderWebUsers();
+                } else {
+                    msg.innerText = data.error || 'Could not load web users.';
+                    msg.classList.remove('hidden');
+                }
+            } catch (err) {
+                msg.innerText = 'Connection error: ' + err.message;
+                msg.classList.remove('hidden');
+            }
+        }
+
+        function renderWebUsers() {
+            const q = (document.getElementById('webUserSearchInput').value || '').trim().toLowerCase();
+            const rows = allWebUsersData.filter(u => !q || (u.email || '').toLowerCase().includes(q));
+            document.getElementById('webUsersCount').innerText = rows.length + ' of ' + allWebUsersData.length + ' web users';
+            const body = document.getElementById('webUsersTableBody');
+            if (!rows.length) {
+                body.innerHTML = '<tr><td colspan="5" class="px-4 py-8 text-center text-gray-500">No web users found.</td></tr>';
+                return;
+            }
+            body.innerHTML = rows.map(u => {
+                const disabled = u.status === 'disabled';
+                const created = u.createdAt ? new Date(u.createdAt).toLocaleString() : '—';
+                const lastLogin = u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString() : '—';
+                return '<tr>' +
+                    '<td class="px-4 py-3 text-white break-all">' + escapeHtml(u.email) + '</td>' +
+                    '<td class="px-4 py-3"><span class="px-2 py-0.5 rounded-full text-[10px] font-black ' + (disabled ? 'bg-amber-500/20 text-amber-300' : 'bg-emerald-500/20 text-emerald-300') + '">' + (disabled ? 'DISABLED' : 'ACTIVE') + '</span></td>' +
+                    '<td class="px-4 py-3 text-gray-400">' + escapeHtml(created) + '</td>' +
+                    '<td class="px-4 py-3 text-gray-400">' + escapeHtml(lastLogin) + '</td>' +
+                    '<td class="px-4 py-3 text-right whitespace-nowrap">' +
+                        '<button onclick="setWebUserDisabled(\'' + u.id + '\', ' + (!disabled) + ')" class="glass-card hover:bg-gray-800 px-2.5 py-1.5 rounded-lg text-[11px] text-gray-300 font-bold transition mr-1">' + (disabled ? 'Enable' : 'Disable') + '</button>' +
+                        '<button onclick="deleteWebUser(\'' + u.id + '\')" class="glass-card hover:bg-red-500/20 px-2.5 py-1.5 rounded-lg text-[11px] text-red-300 font-bold transition border border-red-500/30">Delete</button>' +
+                    '</td></tr>';
+            }).join('');
+        }
+
+        async function setWebUserDisabled(id, disabled) {
+            try {
+                const res = await fetch('/api/web/admin/users/' + encodeURIComponent(id), {
+                    method: 'PATCH',
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify({ disabled })
+                });
+                const data = await res.json();
+                if (data.success) loadWebUsers();
+                else alert(data.error || 'Update failed.');
+            } catch (err) {
+                alert('Connection error: ' + err.message);
+            }
+        }
+
+        async function deleteWebUser(id) {
+            if (!confirm('Delete this web user? They will no longer be able to log in to the patcher site.')) return;
+            try {
+                const res = await fetch('/api/web/admin/users/' + encodeURIComponent(id), {
+                    method: 'DELETE',
+                    headers: getAuthHeaders()
+                });
+                const data = await res.json();
+                if (data.success) loadWebUsers();
+                else alert(data.error || 'Delete failed.');
+            } catch (err) {
+                alert('Connection error: ' + err.message);
+            }
         }
 
         // Tab Switching
