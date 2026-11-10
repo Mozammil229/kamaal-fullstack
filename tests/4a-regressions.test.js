@@ -153,6 +153,26 @@ test('F-11: no "error: e.message" leak remains in controllers (except controlled
     }
 });
 
+test('F4: no raw e.message/err.message reaches a response body except controlled throws', () => {
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const dir = path.join(__dirname, '../src/controllers');
+    for (const f of fs.readdirSync(dir)) {
+        if (!f.endsWith('.js')) continue;
+        const lines = fs.readFileSync(path.join(dir, f), 'utf8').split('\n');
+        lines.forEach((line, i) => {
+            if (!/\.json\(/.test(line)) return;
+            // Word-boundary match only: "maintenance.message" (an admin-authored
+            // config string) must NOT match — only real exception variables.
+            if (!/(?:^|[^A-Za-z0-9_])(e|err|error)\.message/.test(line)) return;
+            if (line.includes('serverError(')) return;
+            // Controlled throws only (same markers as the F-11 test above).
+            const controlled = line.includes("|| 'Password error.'") || line.includes('KEY_ERROR');
+            assert.ok(controlled, `raw exception text in response at ${f}:${i + 1}: ${line.trim()}`);
+        });
+    }
+});
+
 // --- M-P2-18: validation layer ---
 test('F-12: over-long chat text is rejected 400 before auth; limit is clamped', async () => {
     const r = await req('POST', '/api/chat/send', {

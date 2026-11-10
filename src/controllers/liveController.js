@@ -6,6 +6,7 @@
 // expiresAt, newSessionExpiresAt, uses }. The token value itself is the
 // only credential in the response; the server key is never included.
 const { getActiveConfig } = require('./configController');
+const { serverError } = require('../utils/serverError');
 const { mintEphemeralToken, LIVE_MODELS, DEFAULT_LIVE_MODEL, LIVE_WS_URL, LIVE_VOICES } = require('../services/liveTokenService');
 
 async function mintLiveToken(req, res) {
@@ -53,7 +54,7 @@ async function mintLiveToken(req, res) {
         if (e && e.code === 'GEMINI_KEY_MISSING') {
             return res.status(503).json({ success: false, error: 'Live voice is not configured on the server.', code: 'LIVE_NOT_CONFIGURED' });
         }
-        return res.status(502).json({ success: false, error: (e && e.message) || 'Live token mint failed.', code: 'LIVE_MINT_FAILED' });
+        return serverError(res, e, 502, 'Live token mint failed.', { code: 'LIVE_MINT_FAILED' });
     }
 }
 
