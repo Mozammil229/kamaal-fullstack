@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const { serverError } = require('../utils/serverError');
 const ProviderApiKey = require('../models/ProviderApiKey');
 const KamaalApiKey = require('../models/KamaalApiKey');
 const AdminAudit = require('../models/AdminAudit');
@@ -43,7 +44,7 @@ async function getProviders(req, res) {
         for (const p of PROVIDERS) out.push(await pool.listPoolStatus(p));
         return res.json({ success: true, providers: out });
     } catch (e) {
-        return res.status(500).json({ success: false, error: e.message });
+        return serverError(res, e);
     }
 }
 
@@ -87,7 +88,7 @@ async function addProviderKey(req, res) {
         if (e && e.code === 11000) {
             return res.status(409).json({ success: false, error: 'This key is already in the pool.' });
         }
-        return res.status(500).json({ success: false, error: e.message });
+        return serverError(res, e);
     }
     pool.refresh(provider);
     await audit(adminName(req), 'apikey.provider_key.create', `${provider}:${created.keyLast4}`);
@@ -133,7 +134,7 @@ async function createKamaalKey(req, res) {
             });
         } catch (e) {
             if (e && e.code === 11000) continue; // collision — fresh id
-            return res.status(500).json({ success: false, error: e.message });
+            return serverError(res, e);
         }
     }
     if (!created) return res.status(500).json({ success: false, error: 'Could not issue a key. Try again.' });
@@ -172,7 +173,7 @@ async function listKamaalKeys(req, res) {
             }))
         });
     } catch (e) {
-        return res.status(500).json({ success: false, error: e.message });
+        return serverError(res, e);
     }
 }
 
@@ -295,6 +296,6 @@ async function setEncryptionKey(req, res) {
                 error: 'Panel key storage needs ADMIN_PASS set in the server env (it wraps the key). Ask the server owner to set it, then try again.'
             });
         }
-        return res.status(500).json({ success: false, error: e.message });
+        return serverError(res, e);
     }
 }

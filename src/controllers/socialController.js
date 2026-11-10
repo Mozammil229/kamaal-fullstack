@@ -10,6 +10,7 @@
 // - Stories: server filters expired rows on every read.
 // - Media filenames are server-randomized; client filename/MIME never trusted.
 const crypto = require('crypto');
+const { serverError } = require('../utils/serverError');
 const mongoose = require('mongoose');
 const { connectToDatabase } = require('../config/db');
 const User = require('../models/User');
@@ -378,7 +379,7 @@ async function sendMessage(req, res) {
             const saved = await processUpload(req.file, kind);
             mediaUrl = saved.url;
         } catch (e) {
-            return res.status(400).json({ success: false, error: e.message });
+            return serverError(res, e, 400, 'Invalid request. Please check your input and try again.');
         }
         if (kind === 'voice') {
             durationSec = Math.max(0, Math.min(600, parseInt((req.body && req.body.durationSec) || '0', 10) || 0));
@@ -695,7 +696,7 @@ async function createPost(req, res) {
             const saved = await processUpload(req.file, 'photo');
             photoUrl = saved.url;
         } catch (e) {
-            return res.status(400).json({ success: false, error: e.message });
+            return serverError(res, e, 400, 'Invalid request. Please check your input and try again.');
         }
     }
     if (!text && !photoUrl) {
@@ -728,7 +729,7 @@ async function createStory(req, res) {
     try {
         saved = await processUpload(req.file, 'photo');
     } catch (e) {
-        return res.status(400).json({ success: false, error: e.message });
+        return serverError(res, e, 400, 'Invalid request. Please check your input and try again.');
     }
     const now = Date.now();
     const story = await Story.create({

@@ -102,7 +102,7 @@ function createGenerateFlowHandler(deps) {
             reply = await generate(message, buildFlowSystemPrompt(), '', modelToUse);
         } catch (e) {
             const status = (e.code === 'GEMINI_KEY_MISSING' || e.code === 'AI_KEY_MISSING') ? 503 : 500;
-            return res.status(status).json({ success: false, error: e.message, code: e.code || 'AI_ERROR' });
+            return res.status(status).json({ success: false, error: 'Something went wrong. Please try again.', code: e.code || 'AI_ERROR' });
         }
 
         const out = classifyModelReply(reply);

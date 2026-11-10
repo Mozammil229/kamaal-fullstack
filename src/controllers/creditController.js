@@ -1,4 +1,5 @@
 const User = require('../models/User');
+const { serverError } = require('../utils/serverError');
 const RedeemKey = require('../models/RedeemKey');
 const PaymentProof = require('../models/PaymentProof');
 const SupportMessage = require('../models/SupportMessage');
@@ -32,7 +33,7 @@ async function getCredits(req, res) {
             planExpiry: user.planExpiry
         });
     } catch (e) {
-        return res.status(500).json({ success: false, error: e.message });
+        return serverError(res, e);
     }
 }
 
@@ -89,7 +90,7 @@ async function deductCredit(req, res) {
         if (e.message.includes('Insufficient credits')) {
             return res.status(402).json({ success: false, error: 'Insufficient credits. Please upgrade or redeem voucher.' });
         }
-        return res.status(500).json({ success: false, error: e.message });
+        return serverError(res, e);
     }
 }
 
@@ -167,7 +168,7 @@ async function authorizePatch(req, res) {
             throw e;
         }
     } catch (e) {
-        return res.status(500).json({ authorized: false, error: e.message });
+        return serverError(res, e, 500, 'Something went wrong. Please try again.', { authorized: false });
     }
 }
 
@@ -270,7 +271,7 @@ async function redeemKey(req, res) {
             plan: updated.proPlan
         });
     } catch (e) {
-        return res.status(500).json({ success: false, error: e.message });
+        return serverError(res, e);
     }
 }
 
@@ -347,7 +348,7 @@ async function submitPaymentProof(req, res) {
             proofId: proof._id
         });
     } catch (e) {
-        return res.status(500).json({ success: false, error: e.message });
+        return serverError(res, e);
     }
 }
 

@@ -18,8 +18,7 @@ const messageRoutes = require('./routes/messageRoutes');
 const crashReportRoutes = require('./routes/crashReportRoutes');
 // v66 — Wink AI video enhance (stateless JSON proxy; server never gets video bytes).
 const winkRoutes = require('./routes/winkRoutes');
-// S5 C1 PROBE — TEMPORARY route (delete once C1 is decided).
-const subtitleProbeRoutes = require('./routes/subtitleProbeRoutes');
+// 4A (M-P2-12): the temporary S5 C1 subtitles probe route was deleted here.
 // PATCHER SITE — web users (2026-11-09): POST /api/web/register, POST
 // /api/web/login, GET /api/web/me (web JWT), /api/web/admin/* (admin JWT).
 // Separate collection/auth from the app — see src/models/WebUser.js.
@@ -49,12 +48,43 @@ const { loginRateLimit } = require('./routes/authRoutes');
 
 const app = express();
 
-app.use(cors({ origin: '*', credentials: true }));
+// 4A (M-P1-03): CORS allowlist replaces origin:'*' + credentials:true.
+// Origins come from CORS_ALLOWED_ORIGINS (comma-separated). Default: the live
+// Vercel API origin only — the PWA origin is added by the operator once
+// hosting (H-01) is answered. Requests with no Origin (Android app, curl)
+// are always allowed; a disallowed Origin gets no ACAO header.
+const CORS_ALLOWED_ORIGINS = (process.env.CORS_ALLOWED_ORIGINS || 'https://kamaal-fullstack-ten.vercel.app')
+    .split(',').map(s => s.trim()).filter(Boolean);
+app.use(cors({
+    origin: (origin, cb) => {
+        if (!origin) return cb(null, true);
+        if (CORS_ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+        return cb(null, false);
+    },
+    credentials: true
+}));
+// 4A (M-P2-16): security headers. HSTS only once HTTPS is enforced end-to-end;
+// CSP stays report-only until 4D proves it does not break the PWA/SW.
+app.disable('x-powered-by');
+app.use((req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Referrer-Policy', 'no-referrer-when-downgrade');
+    res.setHeader('Permissions-Policy', 'camera=(self), microphone=(self), geolocation=(), payment=()');
+    const proto = req.headers['x-forwarded-proto'] || (req.secure ? 'https' : 'http');
+    if (proto === 'https') res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    res.setHeader('Content-Security-Policy-Report-Only',
+        "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' https://kamaal-fullstack-ten.vercel.app; img-src 'self' data: https:; media-src 'self' blob:; frame-ancestors 'none'; object-src 'none'; base-uri 'self'");
+    next();
+});
 // v91 (BugHunter backend F28): the JSON body limit was 15MB — far above
 // anything the API accepts (largest legit JSON payload is a 64KB crash
 // stack trace). 4MB caps abuse (oversized message/recipe bodies) early.
 app.use(express.json({ limit: '4mb' }));
 app.use(express.urlencoded({ extended: true, limit: '4mb' }));
+// 4A (M-P2-18): server-side input validation layer (caps, numeric checks, clamps).
+const { validateInput } = require('./middleware/validateInput');
+app.use(validateInput);
 
 // Request logging in development
 if (process.env.NODE_ENV !== 'production') {
@@ -97,11 +127,11 @@ app.use('/api', newsRoutes);
 // router.use(authenticateUser) would 401 the ops internal-key Bearer before
 // opsAuth ever runs.
 app.use('/api', opsRoutes);
-// S5 C1 PROBE — TEMPORARY (delete once C1 is decided). Mounted BEFORE
+// 4A (M-P2-12): the temporary S5 C1 subtitles probe route was deleted.
+// The comment below belonged to its mount; the web-auth mount follows.
 // socialRoutes on purpose: socialRoutes' blanket router.use(authenticateUser)
 // would 401 the admin x-admin-key Bearer before requireAdminAuth ever runs
 // (same trap as donut/news/ops — see their mount comments).
-app.use('/api', subtitleProbeRoutes);
 // PATCHER SITE — web auth. Mounted at /api/web (not /api — the /api
 // aliases below must keep serving the APP auth) and BEFORE socialRoutes
 // on purpose (same trap as probe/donut/news/ops): socialRoutes' blanket
@@ -165,13 +195,10 @@ app.use((req, res) => {
     res.status(404).json({ success: false, error: `Route '${req.originalUrl}' not found.` });
 });
 
-// Global Error Handler
+// Global Error Handler — always generic in every environment (M-P2-17).
+const { serverError } = require('./utils/serverError');
 app.use((err, req, res, next) => {
-    console.error('Unhandled Server Error:', err);
-    res.status(500).json({
-        success: false,
-        error: process.env.NODE_ENV === 'production' ? 'Internal server error.' : err.message
-    });
+    serverError(res, err);
 });
 
 module.exports = app;

@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const { serverError } = require('../utils/serverError');
 const jwt = require('jsonwebtoken');
 const env = require('../config/env');
 const User = require('../models/User');
@@ -12,9 +13,15 @@ const { revokeToken } = require('../middleware/auth');
 const { connectToDatabase, isDbConnected } = require('../config/db');
 
 // Admin Login
-function adminLogin(req, res) {
+// 4A (M-P2-19): getUsers response allowlist (exported for the regression test).
+const USER_LIST_FIELDS = 'username name email phone deviceId credits creditsEarned tag isPro betaMember proPlan planExpiry planExpiryDate tier status banReason role referralCode referredBy createdAt lastActiveAt';
+
+// 4A (M-P1-04): fixed ~400ms delay on failed admin logins (constant-time:
+// the same delay runs whether the username or the password was wrong).
+async function adminLogin(req, res) {
     const { username, password } = req.body;
     if (!username || !password) {
+        await new Promise(r => setTimeout(r, 400));
         return res.status(400).json({ success: false, error: 'Username and password required.' });
     }
 
@@ -38,6 +45,7 @@ function adminLogin(req, res) {
             admin: { username: env.ADMIN_USER, role: 'Owner' }
         });
     }
+    await new Promise(r => setTimeout(r, 400));
     return res.status(401).json({ success: false, error: 'Invalid Admin Username or Password.' });
 }
 
@@ -86,7 +94,7 @@ async function getTelemetry(req, res) {
             }
         });
     } catch (e) {
-        return res.status(500).json({ success: false, error: e.message });
+        return serverError(res, e);
     }
 }
 
@@ -107,15 +115,18 @@ async function getUsers(req, res) {
             ]
         } : {};
 
+        // 4A (M-P2-19): explicit field allowlist — the old '-token -__v' still
+        // returned every other field. passwordHash/customGeminiKey/fcmToken
+        // are select:false in the schema AND absent here (defence in depth).
         const users = await User.find(query)
             .sort({ createdAt: -1 })
             .limit(Math.min(200, Number(limit) || 100))
-            .select('-token -__v')
+            .select(USER_LIST_FIELDS)
             .lean();
 
         return res.json({ success: true, count: users.length, users });
     } catch (e) {
-        return res.status(500).json({ success: false, error: e.message });
+        return serverError(res, e);
     }
 }
 
@@ -251,7 +262,7 @@ async function updateUser(req, res) {
 
         return res.json({ success: true, message: `Updated user '${username}' successfully.`, user: finalUser });
     } catch (e) {
-        return res.status(500).json({ success: false, error: e.message });
+        return serverError(res, e);
     }
 }
 
@@ -267,7 +278,7 @@ async function getTransactions(req, res) {
             .lean();
         return res.json({ success: true, transactions });
     } catch (e) {
-        return res.status(500).json({ success: false, error: e.message });
+        return serverError(res, e);
     }
 }
 
@@ -278,6 +289,8 @@ async function broadcast(req, res) {
     if (!text) return res.status(400).json({ success: false, error: 'Message text required.' });
 
     const cleanText = String(text).trim();
+    // 4A (M-P2-18): broadcast cap 1000 chars (plan §4.8 rule 5).
+    if (cleanText.length > 1000) return res.status(400).json({ success: false, error: 'Broadcast is too long (max 1000 characters).' });
     try {
         const bcast = await ChatMessage.create({
             channel: 'global',
@@ -309,7 +322,7 @@ async function broadcast(req, res) {
 
         return res.json({ success: true, message: 'Broadcast sent globally to all users.', broadcast: bcast });
     } catch (e) {
-        return res.status(500).json({ success: false, error: e.message });
+        return serverError(res, e);
     }
 }
 
@@ -346,7 +359,7 @@ async function sendDirectMessage(req, res) {
 
         return res.json({ success: true, message: `Direct notification sent to @${cleanRecipient}.` });
     } catch (e) {
-        return res.status(500).json({ success: false, error: e.message });
+        return serverError(res, e);
     }
 }
 
@@ -460,7 +473,7 @@ async function reviewPayment(req, res) {
             return res.json({ success: true, message: 'Payment rejected.' });
         }
     } catch (e) {
-        return res.status(500).json({ success: false, error: e.message });
+        return serverError(res, e);
     }
 }
 
@@ -471,7 +484,7 @@ async function listPayments(req, res) {
         const proofs = await PaymentProof.find().sort({ createdAt: -1 }).limit(100);
         return res.json({ success: true, proofs });
     } catch (e) {
-        return res.status(500).json({ success: false, error: e.message });
+        return serverError(res, e);
     }
 }
 
@@ -482,7 +495,7 @@ async function listKeys(req, res) {
         const keys = await RedeemKey.find().sort({ createdAt: -1 }).limit(150).lean();
         return res.json({ success: true, keys });
     } catch (e) {
-        return res.status(500).json({ success: false, error: e.message });
+        return serverError(res, e);
     }
 }
 
@@ -613,7 +626,7 @@ async function updateConfig(req, res) {
             : conf;
         return res.json({ success: true, message: 'System Governance & Upgrade Configuration saved successfully.', config: conf });
     } catch (e) {
-        return res.status(500).json({ success: false, error: e.message });
+        return serverError(res, e);
     }
 }
 
@@ -630,5 +643,6 @@ module.exports = {
     listPayments,
     listKeys,
     createKeys,
-    updateConfig
+    updateConfig,
+    USER_LIST_FIELDS
 };

@@ -1,4 +1,5 @@
 const AppConfig = require('../models/AppConfig');
+const { serverError } = require('../utils/serverError');
 const User = require('../models/User');
 const { generateAIReply } = require('../services/aiProviderChain');
 const aiUsage = require('../services/aiUsageService');
@@ -195,7 +196,7 @@ async function chat(req, res) {
     } catch (e) {
         // Never fabricate an AI reply on failure. Surface a clear, client-safe error.
         const status = (e.code === 'GEMINI_KEY_MISSING' || e.code === 'AI_KEY_MISSING') ? 503 : 500;
-        return res.status(status).json({ success: false, error: e.message, code: e.code || 'AI_ERROR' });
+        return res.status(status).json({ success: false, error: 'Something went wrong. Please try again.', code: e.code || 'AI_ERROR' });
     }
 }
 
@@ -212,7 +213,7 @@ async function getSystemPrompt(req, res) {
             featureFlags: conf?.featureFlags
         });
     } catch (e) {
-        return res.status(500).json({ success: false, error: e.message });
+        return serverError(res, e);
     }
 }
 
@@ -253,7 +254,7 @@ async function updateSystemPrompt(req, res) {
             currentModel: conf.currentModel
         });
     } catch (e) {
-        return res.status(500).json({ success: false, error: e.message });
+        return serverError(res, e);
     }
 }
 
@@ -268,7 +269,7 @@ async function getUsage(req, res) {
         const u = await aiUsage.getUsage(username, user);
         return res.json({ success: true, ...u });
     } catch (e) {
-        return res.status(500).json({ success: false, error: e.message });
+        return serverError(res, e);
     }
 }
 
@@ -285,7 +286,7 @@ async function reportUsage(req, res) {
         const u = await aiUsage.addUsage(username, user?.displayKamalId || '', req.body?.seconds, user);
         return res.json({ success: true, ...u });
     } catch (e) {
-        return res.status(500).json({ success: false, error: e.message });
+        return serverError(res, e);
     }
 }
 

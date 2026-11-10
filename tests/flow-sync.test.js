@@ -24,6 +24,13 @@
 // real secret, credential, or message body anywhere in this file.
 
 'use strict';
+// 4A: dummy secrets for boot only (same pattern as tests/web-auth.test.js).
+// env.js is fail-closed (F-02 fix, pre-existing) — without these, requiring
+// any controller that loads env.js throws before the first test runs.
+process.env.JWT_SECRET = 'test-jwt-secret-4a-only';
+process.env.ADMIN_JWT_SECRET = 'test-admin-jwt-secret-4a-only';
+delete process.env.MONGODB_URI;
+
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');

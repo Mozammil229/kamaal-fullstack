@@ -6,8 +6,8 @@ const { requireAdminAuth } = require('../middleware/auth');
 const { rateLimit } = require('../middleware/rateLimit');
 
 // v91 (BugHunter backend F27): the admin login was unthrottled — password
-// guessing in a loop against the single owner password. 10/min per IP.
-const adminLoginRateLimit = rateLimit({ windowMs: 60 * 1000, max: 10, message: 'Too many admin login attempts. Try again in a minute.' });
+// guessing in a loop against the single owner password. 4A (M-P1-04): 5/min per IP.
+const adminLoginRateLimit = rateLimit({ windowMs: 60 * 1000, max: 5, message: 'Too many admin login attempts. Try again in a minute.' });
 
 router.post('/login', adminLoginRateLimit, adminController.adminLogin);
 router.post('/logout', adminController.adminLogout);

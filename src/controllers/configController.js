@@ -1,4 +1,5 @@
 const AppConfig = require('../models/AppConfig');
+const { serverError } = require('../utils/serverError');
 const { connectToDatabase, isDbConnected } = require('../config/db');
 
 // In-memory fallback config when MongoDB is offline
@@ -87,7 +88,7 @@ async function getAppConfig(req, res) {
             serverTime: Date.now()
         });
     } catch (e) {
-        return res.status(500).json({ success: false, error: e.message });
+        return serverError(res, e);
     }
 }
 
@@ -111,17 +112,21 @@ async function getAppVersion(req, res) {
             message: conf?.updateNotes || ''
         });
     } catch (e) {
-        return res.status(500).json({ success: false, error: e.message });
+        return serverError(res, e);
     }
 }
 
 // Health Check (/api/health)
+// 4A (M-P2-11): honest HTTP status — the body already reported DB state, but
+// the status was always 200. Now 503 when the DB is down (same body shape,
+// so existing clients parsing the body keep working).
 async function getHealth(req, res) {
     const { isDbConnected } = require('../config/db');
-    return res.json({
-        status: 'OK',
+    const connected = isDbConnected();
+    return res.status(connected ? 200 : 503).json({
+        status: connected ? 'OK' : 'DEGRADED',
         version: '2.0.0',
-        database: isDbConnected() ? 'Connected (MongoDB Atlas)' : 'Disconnected / Standby',
+        database: connected ? 'Connected (MongoDB Atlas)' : 'Disconnected / Standby',
         timestamp: Date.now()
     });
 }

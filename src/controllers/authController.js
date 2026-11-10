@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const { serverError } = require('../utils/serverError');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const env = require('../config/env');
@@ -22,6 +23,13 @@ function legacySha256(password) {
  * scheme and should be re-hashed with bcrypt immediately (transparent
  * migration — no user password reset needed).
  */
+// 4A (M-P1-07): legacy-password kill-switch. Default OFF — current behaviour
+// (transparent bcrypt migration) is preserved for Android. When the operator
+// sets DISABLE_LEGACY_PASSWORD_FALLBACK=true, legacy SHA-256/plaintext logins
+// are REJECTED with legacyRejected:true and the caller answers 403
+// "password reset required". No real user is force-reset by this change —
+// flipping the switch is a separate, approval-gated operation.
+const LEGACY_FALLBACK_DISABLED = process.env.DISABLE_LEGACY_PASSWORD_FALLBACK === 'true';
 function verifyPassword(password, user) {
     const pw = String(password);
     const stored = user.passwordHash || '';
@@ -31,6 +39,10 @@ function verifyPassword(password, user) {
             return { ok: bcrypt.compareSync(pw, stored), migrate: false };
         }
     } catch (_) { /* fall through to legacy checks */ }
+    const legacyMatch = stored === legacySha256(pw) || user.password === pw || stored === pw;
+    if (legacyMatch && LEGACY_FALLBACK_DISABLED) {
+        return { ok: false, migrate: false, legacyRejected: true };
+    }
     // 2) legacy unsalted SHA-256 → migrate
     if (stored === legacySha256(pw)) return { ok: true, migrate: true };
     // 3) ancient plaintext fallbacks (kept from original code) → migrate
@@ -341,7 +353,7 @@ async function register(req, res) {
             user: toSafeUser(newUser)
         });
     } catch (e) {
-        return res.status(500).json({ success: false, error: e.message });
+        return serverError(res, e);
     }
 }
 
@@ -393,7 +405,10 @@ async function login(req, res) {
             return res.status(401).json({ success: false, error: 'Invalid credentials.' });
         }
 
-        const { ok, migrate } = verifyPassword(plainPassword, user);
+        const { ok, migrate, legacyRejected } = verifyPassword(plainPassword, user);
+        if (legacyRejected) {
+            return res.status(403).json({ success: false, error: 'Password reset required. Please reset your password.', passwordResetRequired: true });
+        }
         if (!ok) {
             return res.status(401).json({ success: false, error: 'Invalid credentials.' });
         }
@@ -439,7 +454,7 @@ async function login(req, res) {
             user: toSafeUser(user)
         });
     } catch (e) {
-        return res.status(500).json({ success: false, error: e.message });
+        return serverError(res, e);
     }
 }
 
@@ -463,7 +478,7 @@ async function verify(req, res) {
         // SECURITY FIX (#3): allowlisted user object — no passwordHash/customGeminiKey.
         return res.json({ success: true, user: toSafeUser(user) });
     } catch (e) {
-        return res.status(500).json({ success: false, error: e.message });
+        return serverError(res, e);
     }
 }
 
@@ -485,5 +500,7 @@ module.exports = {
     verify,
     userLogout,
     serverPubkey,
-    maybeDecryptPassword
+    maybeDecryptPassword,
+    verifyPassword,
+    LEGACY_FALLBACK_DISABLED
 };

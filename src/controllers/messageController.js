@@ -6,6 +6,7 @@
 // - Admin endpoints sit behind requireAdminAuth (admin JWT or ADMIN_PASS).
 // - User replies are rate-limited (30/hour) and capped at 2000 chars.
 const crypto = require('crypto');
+const { serverError } = require('../utils/serverError');
 const mongoose = require('mongoose');
 const { connectToDatabase } = require('../config/db');
 const User = require('../models/User');
@@ -305,7 +306,7 @@ async function adminBroadcastPreview(req, res) {
         const count = await User.countDocuments(filter);
         return res.json({ success: true, audience: label, count });
     } catch (e) {
-        return res.status(400).json({ success: false, error: e.message });
+        return serverError(res, e, 400, 'Invalid request. Please check your input and try again.');
     }
 }
 
@@ -324,7 +325,7 @@ async function adminBroadcast(req, res) {
             req.body && req.body.status
         ));
     } catch (e) {
-        return res.status(400).json({ success: false, error: e.message });
+        return serverError(res, e, 400, 'Invalid request. Please check your input and try again.');
     }
     try {
         const count = await User.countDocuments(filter);

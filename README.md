@@ -15,11 +15,11 @@
 
 | Key | Value |
 |---|---|
-| `MONGODB_URI` | `mongodb+srv://pukathub_db_user:...@cluster0.y2lzfvn.mongodb.net/MyUsersDB?retryWrites=true&w=majority` |
-| `JWT_SECRET` | `kamaal_jwt_secret_abc123xyz789` |
+| `MONGODB_URI` | `mongodb+srv://<db_user>:<db_password>@<cluster-host>/<database>?retryWrites=true&w=majority` |
+| `JWT_SECRET` | `<generate-a-long-random-secret>` |
 | `ADMIN_USER` | `admin` |
-| `ADMIN_PASS` | `ADmin` |
-| `ADMIN_JWT_SECRET` | `kamaal_admin_jwt_secret_2026` |
+| `ADMIN_PASS` | `<choose-a-strong-admin-password>` |
+| `ADMIN_JWT_SECRET` | `<generate-a-long-random-secret>` |
 | `GEMINI_API_KEY` | (optional) |
 
 5. **Deploy**
@@ -30,7 +30,7 @@
 
 ## 🔐 Admin Panel
 - URL: `https://aapka-app.vercel.app/admin.html`
-- Username: `admin` / Password: `ADmin`
+- Username: `admin` / Password: `<set-in-environment>`
 - No CORS issue (same origin)
 - No proxy needed (same origin)
 

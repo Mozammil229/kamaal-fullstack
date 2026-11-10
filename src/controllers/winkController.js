@@ -37,7 +37,7 @@ const pollLimit = winkRateLimit(300, 60 * 60 * 1000); // 300 polls / hour / user
 
 function sendWinkError(res, err) {
     if (err instanceof WinkError) {
-        return res.status(err.status).json({ success: false, error: err.message, code: err.code });
+        return res.status(err.status).json({ success: false, error: 'Something went wrong. Please try again.', code: err.code });
     }
     return res.status(502).json({ success: false, error: 'Wink service error.', code: 'wink_error' });
 }

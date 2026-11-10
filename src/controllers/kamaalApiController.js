@@ -137,7 +137,7 @@ async function chat(req, res) {
         return res.json({ success: true, reply, model: modelToUse, tier, creditsRemaining });
     } catch (e) {
         const status = (e.code === 'GEMINI_KEY_MISSING' || e.code === 'AI_KEY_MISSING') ? 503 : 500;
-        return res.status(status).json({ success: false, error: e.message, code: e.code || 'AI_ERROR', tier, creditsRemaining });
+        return res.status(status).json({ success: false, error: 'Something went wrong. Please try again.', code: e.code || 'AI_ERROR', tier, creditsRemaining });
     }
 }
 

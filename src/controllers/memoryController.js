@@ -1,4 +1,5 @@
 const User = require('../models/User');
+const { serverError } = require('../utils/serverError');
 const UserMemory = require('../models/UserMemory');
 const { isUnlimited } = require('../services/aiUsageService');
 const memoryCrypto = require('../services/memoryCrypto');
@@ -45,7 +46,7 @@ async function getMemory(req, res) {
             })),
         });
     } catch (e) {
-        return res.status(500).json({ success: false, error: e.message });
+        return serverError(res, e);
     }
 }
 
@@ -67,7 +68,7 @@ async function deleteFact(req, res) {
         );
         return res.json({ success: true, removed: result.modifiedCount > 0 });
     } catch (e) {
-        return res.status(500).json({ success: false, error: e.message });
+        return serverError(res, e);
     }
 }
 
@@ -83,7 +84,7 @@ async function clearMemory(req, res) {
         );
         return res.json({ success: true, cleared: true });
     } catch (e) {
-        return res.status(500).json({ success: false, error: e.message });
+        return serverError(res, e);
     }
 }
 
@@ -100,7 +101,7 @@ async function updateSettings(req, res) {
         );
         return res.json({ success: true, enabled: doc.enabled });
     } catch (e) {
-        return res.status(500).json({ success: false, error: e.message });
+        return serverError(res, e);
     }
 }
 

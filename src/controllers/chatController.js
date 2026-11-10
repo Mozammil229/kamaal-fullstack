@@ -1,4 +1,5 @@
 const ChatMessage = require('../models/ChatMessage');
+const { serverError } = require('../utils/serverError');
 const SupportMessage = require('../models/SupportMessage');
 const Poll = require('../models/Poll');
 const User = require('../models/User');
@@ -48,7 +49,7 @@ async function getChatMessages(req, res) {
 
         return res.json({ success: true, channel, messages });
     } catch (e) {
-        return res.status(500).json({ success: false, error: e.message });
+        return serverError(res, e);
     }
 }
 
@@ -89,7 +90,7 @@ async function sendChatMessage(req, res) {
 
         return res.json({ success: true, message: 'Sent', id: newMsg._id });
     } catch (e) {
-        return res.status(500).json({ success: false, error: e.message });
+        return serverError(res, e);
     }
 }
 
@@ -130,7 +131,7 @@ async function reactChatMessage(req, res) {
         if (!updated) return res.status(404).json({ success: false, error: 'Message not found.' });
         return res.json({ success: true, reactions: updated.reactions });
     } catch (e) {
-        return res.status(500).json({ success: false, error: e.message });
+        return serverError(res, e);
     }
 }
 
@@ -172,7 +173,7 @@ async function getSupportMessages(req, res) {
 
         return res.json({ success: true, messages });
     } catch (e) {
-        return res.status(500).json({ success: false, error: e.message });
+        return serverError(res, e);
     }
 }
 
@@ -206,7 +207,7 @@ async function sendSupportMessage(req, res) {
             timestamp: msg.timestamp
         });
     } catch (e) {
-        return res.status(500).json({ success: false, error: e.message });
+        return serverError(res, e);
     }
 }
 
@@ -217,7 +218,7 @@ async function getActivePoll(req, res) {
         const poll = await Poll.findOne({ active: true }).sort({ createdAt: -1 });
         return res.json({ success: true, poll });
     } catch (e) {
-        return res.status(500).json({ success: false, error: e.message });
+        return serverError(res, e);
     }
 }
 
@@ -260,7 +261,7 @@ async function votePoll(req, res) {
         }
         return res.json({ success: true, poll: updated });
     } catch (e) {
-        return res.status(500).json({ success: false, error: e.message });
+        return serverError(res, e);
     }
 }
 

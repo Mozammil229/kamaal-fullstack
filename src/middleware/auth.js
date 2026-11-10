@@ -4,8 +4,20 @@ const env = require('../config/env');
 const RevokedToken = require('../models/RevokedToken');
 const { isDbConnected } = require('../config/db');
 
-// In-memory fallback revocation cache for resilience if DB connection is intermittent
+// In-memory fallback revocation cache for resilience if DB connection is intermittent.
+// 4A (F-01 residual): the set was unbounded — cap it (FIFO evict oldest) so a
+// long-lived process cannot grow memory without limit. The DB check is the
+// source of truth; this cache is only a fast path.
+const MAX_LOCAL_REVOCATIONS = 10000;
 const localRevocationSet = new Set();
+function addLocalRevocation(thash) {
+    if (localRevocationSet.has(thash)) return;
+    if (localRevocationSet.size >= MAX_LOCAL_REVOCATIONS) {
+        const oldest = localRevocationSet.values().next().value;
+        localRevocationSet.delete(oldest);
+    }
+    localRevocationSet.add(thash);
+}
 
 function hashToken(token) {
     return crypto.createHash('sha256').update(String(token).trim()).digest('hex');
@@ -19,7 +31,7 @@ async function isTokenRevoked(token) {
         try {
             const found = await RevokedToken.findOne({ tokenHash: thash });
             if (found) {
-                localRevocationSet.add(thash);
+                addLocalRevocation(thash);
                 return true;
             }
         } catch (e) {
@@ -37,7 +49,7 @@ async function isTokenRevoked(token) {
 async function revokeToken(token, reason = 'logout') {
     if (!token) return;
     const thash = hashToken(token);
-    localRevocationSet.add(thash);
+    addLocalRevocation(thash);
 
     if (isDbConnected()) {
         try {
@@ -131,5 +143,8 @@ module.exports = {
     authenticateUser,
     requireAdminAuth,
     revokeToken,
-    isTokenRevoked
+    isTokenRevoked,
+    // Test hook (4A): lets the regression suite assert the bound without a DB.
+    _localRevocationCount: () => localRevocationSet.size,
+    MAX_LOCAL_REVOCATIONS
 };

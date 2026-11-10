@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const { serverError } = require('../utils/serverError');
 const User = require('../models/User');
 const OnlineToolToken = require('../models/OnlineToolToken');
 const { connectToDatabase, isDbConnected } = require('../config/db');
@@ -72,7 +73,7 @@ async function issueToken(req, res) {
             expiresIn: TOKEN_TTL_MS / 1000
         });
     } catch (e) {
-        return res.status(500).json({ success: false, error: e.message });
+        return serverError(res, e);
     }
 }
 

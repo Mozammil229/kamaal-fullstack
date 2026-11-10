@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('crypto');
+const { serverError } = require('../utils/serverError');
 const { connectToDatabase, isDbConnected } = require('../config/db');
 const User = require('../models/User');
 const PatchRecipe = require('../models/PatchRecipe');
@@ -148,7 +149,7 @@ async function requestRecipe(req, res) {
             expiresAt: expiresAt.getTime()
         });
     } catch (e) {
-        return res.status(500).json({ success: false, error: e.message });
+        return serverError(res, e);
     }
 }
 
@@ -192,7 +193,7 @@ async function applyRecipe(req, res) {
         }
         return res.json({ success: true, ok: true });
     } catch (e) {
-        return res.status(500).json({ success: false, error: e.message });
+        return serverError(res, e);
     }
 }
 
