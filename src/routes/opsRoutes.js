@@ -48,6 +48,7 @@ function opsRateLimit(req, res, next) {
     opsBuckets.set(key, entry);
     if (opsBuckets.size > 5000) opsBuckets.clear();
     if (entry.count > max) {
+        res.setHeader('Retry-After', String(Math.max(1, Math.ceil((entry.start + windowMs - now) / 1000)))); // 4D (W4): every 429 carries Retry-After (seconds until this bucket resets).
         return res.status(429).json({ success: false, error: 'Rate limit exceeded. Please slow down.' });
     }
     next();

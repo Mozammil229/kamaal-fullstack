@@ -22,6 +22,7 @@ function loginRateLimit(req, res, next) {
     loginAttempts.set(key, entry);
     if (loginAttempts.size > 2000) loginAttempts.clear();
     if (entry.count > max) {
+        res.setHeader('Retry-After', String(Math.max(1, Math.ceil((entry.start + windowMs - now) / 1000)))); // 4D (W4): every 429 carries Retry-After (seconds until this bucket resets).
         return res.status(429).json({ success: false, error: 'Too many login attempts. Try again in a minute.' });
     }
     next();

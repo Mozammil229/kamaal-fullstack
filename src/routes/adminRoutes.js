@@ -10,7 +10,9 @@ const { rateLimit } = require('../middleware/rateLimit');
 const adminLoginRateLimit = rateLimit({ windowMs: 60 * 1000, max: 5, message: 'Too many admin login attempts. Try again in a minute.' });
 
 router.post('/login', adminLoginRateLimit, adminController.adminLogin);
-router.post('/logout', adminController.adminLogout);
+// 4D: admin logout is admin-authenticated (was unprotected before) and
+// clears the `kamaal_admin` cookie (see adminController.adminLogout).
+router.post('/logout', requireAdminAuth, adminController.adminLogout);
 
 // Protected Admin Endpoints
 router.use(requireAdminAuth);

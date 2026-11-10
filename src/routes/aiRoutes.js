@@ -22,6 +22,7 @@ function aiChatRateLimit(req, res, next) {
     aiChatBuckets.set(key, entry);
     if (aiChatBuckets.size > 5000) aiChatBuckets.clear();
     if (entry.count > max) {
+        res.setHeader('Retry-After', String(Math.max(1, Math.ceil((entry.start + windowMs - now) / 1000)))); // 4D (W4): every 429 carries Retry-After (seconds until this bucket resets).
         return res.status(429).json({ success: false, error: 'Rate limit exceeded. Please slow down.' });
     }
     next();
@@ -53,6 +54,7 @@ function flowGenerateRateLimit(req, res, next) {
     flowBuckets.set(key, entry);
     if (flowBuckets.size > 5000) flowBuckets.clear();
     if (entry.count > max) {
+        res.setHeader('Retry-After', String(Math.max(1, Math.ceil((entry.start + windowMs - now) / 1000)))); // 4D (W4): every 429 carries Retry-After (seconds until this bucket resets).
         return res.status(429).json({ success: false, error: 'Rate limit exceeded. Please slow down.' });
     }
     next();
@@ -75,6 +77,7 @@ function liveTokenRateLimit(req, res, next) {
     liveTokenBuckets.set(key, entry);
     if (liveTokenBuckets.size > 5000) liveTokenBuckets.clear();
     if (entry.count > max) {
+        res.setHeader('Retry-After', String(Math.max(1, Math.ceil((entry.start + windowMs - now) / 1000)))); // 4D (W4): every 429 carries Retry-After (seconds until this bucket resets).
         return res.status(429).json({ success: false, error: 'Too many Live token requests. Please wait a moment.' });
     }
     next();
@@ -118,6 +121,7 @@ function extractRateLimit(req, res, next) {
     extractBuckets.set(key, entry);
     if (extractBuckets.size > 5000) extractBuckets.clear();
     if (entry.count > max) {
+        res.setHeader('Retry-After', String(Math.max(1, Math.ceil((entry.start + windowMs - now) / 1000)))); // 4D (W4): every 429 carries Retry-After (seconds until this bucket resets).
         return res.status(429).json({ success: false, error: 'Rate limit exceeded. Please slow down.' });
     }
     next();

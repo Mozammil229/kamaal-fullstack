@@ -63,8 +63,17 @@ app.use(cors({
     },
     credentials: true
 }));
-// 4A (M-P2-16): security headers. HSTS only once HTTPS is enforced end-to-end;
-// CSP stays report-only until 4D proves it does not break the PWA/SW.
+// 4A (M-P2-16): security headers. HSTS only once HTTPS is enforced end-to-end.
+// 4D (W2): CSP ENFORCED (was Report-Only in 4A). Directives per audit §4.8
+// rule 9. style-src 'self' WITHOUT 'unsafe-inline': the PWA's React style={}
+// props compile to CSSOM assignments (el.style.*), which CSP does not block —
+// proven by built-bundle grep (0 `style=` attributes, 0 setAttribute('style'),
+// 0 <style> in dist/index.html; only .style.*= assignments). The <style> in
+// dist/offline.html is served by the PWA host, not this API, so this header
+// never governs it. SW + Three.js chunks are same-origin (ARCHITECTURE.md),
+// so script-src 'self' cannot block them. connect-src gains PWA_API_ORIGIN
+// when the operator sets it (see .env.example); the PWA origin itself is NOT
+// hardcoded here — it is added via CORS_ALLOWED_ORIGINS once H-01 is answered.
 app.disable('x-powered-by');
 app.use((req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -73,8 +82,12 @@ app.use((req, res, next) => {
     res.setHeader('Permissions-Policy', 'camera=(self), microphone=(self), geolocation=(), payment=()');
     const proto = req.headers['x-forwarded-proto'] || (req.secure ? 'https' : 'http');
     if (proto === 'https') res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-    res.setHeader('Content-Security-Policy-Report-Only',
-        "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' https://kamaal-fullstack-ten.vercel.app; img-src 'self' data: https:; media-src 'self' blob:; frame-ancestors 'none'; object-src 'none'; base-uri 'self'");
+    const pwaApiOrigin = String(process.env.PWA_API_ORIGIN || '').trim();
+    const connectSrc = ['\'self\'', 'https://kamaal-fullstack-ten.vercel.app']
+        .concat(/^https?:\/\/[^\s;,]+$/.test(pwaApiOrigin) ? [pwaApiOrigin] : [])
+        .join(' ');
+    res.setHeader('Content-Security-Policy',
+        `default-src 'self'; script-src 'self'; style-src 'self'; connect-src ${connectSrc}; img-src 'self' data: https:; media-src 'self' blob:; frame-ancestors 'none'; object-src 'none'; base-uri 'self'`);
     next();
 });
 // v91 (BugHunter backend F28): the JSON body limit was 15MB — far above
@@ -85,6 +98,14 @@ app.use(express.urlencoded({ extended: true, limit: '4mb' }));
 // 4A (M-P2-18): server-side input validation layer (caps, numeric checks, clamps).
 const { validateInput } = require('./middleware/validateInput');
 app.use(validateInput);
+// ---- 4D (PWA cookie auth) — CSRF guard ---------------------------------
+// Global on /api, AFTER express.json (above). It enforces ONLY when the
+// request carries the `kamaal_access` cookie, so Bearer/anonymous traffic
+// (Android app, public routes) is unaffected. W2 owns the CORS/headers
+// block above — this block does not touch it.
+const { csrfGuard } = require('./middleware/csrfGuard');
+app.use('/api', csrfGuard);
+// ---- end 4D CSRF guard --------------------------------------------------
 
 // Request logging in development
 if (process.env.NODE_ENV !== 'production') {
@@ -139,6 +160,15 @@ app.use('/api', opsRoutes);
 // the admin-JWT Bearer on /api/web/admin/* before the web middleware
 // ever runs.
 app.use('/api/web', webRoutes);
+// ---- 4D (PWA cookie auth) — ONE mount block -----------------------------
+// POST /api/pwa/auth/login|refresh|logout|logout-everywhere (same app
+// users as Android; see src/routes/pwaAuthRoutes.js). Mounted BEFORE
+// socialRoutes on purpose: socialRoutes' blanket router.use(authenticateUser)
+// would 401 the unauthenticated login/refresh calls before these handlers
+// ever run (same trap as donut/news/ops/web above).
+const pwaAuthRoutes = require('./routes/pwaAuthRoutes');
+app.use('/api/pwa/auth', pwaAuthRoutes);
+// ---- end 4D PWA auth mount ----------------------------------------------
 app.use('/api', socialRoutes);
 // PHASE E — serve uploaded social media (server-randomized filenames only).
 app.use('/uploads', express.static(path.join(__dirname, '..', 'public', 'uploads')));

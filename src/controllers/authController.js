@@ -502,5 +502,12 @@ module.exports = {
     serverPubkey,
     maybeDecryptPassword,
     verifyPassword,
-    LEGACY_FALLBACK_DISABLED
+    LEGACY_FALLBACK_DISABLED,
+    // 4D: shared by the PWA cookie-auth controller so the credential
+    // semantics (normalization, password verification + migration, safe
+    // user shape, token claims) stay identical to app login by construction.
+    toSafeUser,
+    generateToken,
+    normalizeLoginIdentifier,
+    hashPassword
 };

@@ -127,6 +127,11 @@ async function getHealth(req, res) {
         status: connected ? 'OK' : 'DEGRADED',
         version: '2.0.0',
         database: connected ? 'Connected (MongoDB Atlas)' : 'Disconnected / Standby',
+        // 4D (W2, §6.4 item 2): additive PWA field only — body shape and
+        // status behaviour otherwise unchanged. cookieAuth is true: W1's
+        // cookie auth is mounted in this tree (src/routes/pwaAuthRoutes.js,
+        // /api/pwa/auth; tests/4d-pwa-auth.test.js 12/12).
+        pwa: { version: '4d.1', cookieAuth: true },
         timestamp: Date.now()
     });
 }

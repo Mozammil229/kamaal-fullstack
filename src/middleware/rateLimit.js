@@ -17,6 +17,10 @@ function rateLimit({ windowMs, max, keyFn, message }) {
         buckets.set(key, entry);
         if (buckets.size > 5000) buckets.clear();
         if (entry.count > max) {
+            // 4D (W2, §4.8 rule 8): every 429 carries Retry-After (seconds
+            // until this bucket resets) so honest clients can back off.
+            const retryAfter = Math.max(1, Math.ceil((entry.start + windowMs - now) / 1000));
+            res.setHeader('Retry-After', String(retryAfter));
             return res.status(429).json({ success: false, error: message || 'Too many requests. Please slow down.' });
         }
         next();

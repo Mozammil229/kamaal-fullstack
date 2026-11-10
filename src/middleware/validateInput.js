@@ -24,8 +24,14 @@ function validateInput(req, res, next) {
         }
         for (const key of NUMERIC_FIELDS) {
             const v = body[key];
-            if (v !== undefined && v !== null && !Number.isFinite(Number(v))) {
-                return res.status(400).json({ success: false, error: `${key} must be a number.` });
+            if (v === undefined || v === null) continue;
+            const n = Number(v);
+            // 4D (W2, §4.8 rule 5): non-numeric / NaN / negative rejected.
+            // optionIndex must also be an integer (a vote for option 1.5 or
+            // -1 is meaningless; votePoll re-checks the range against the
+            // poll, this layer rejects the malformed shape up front).
+            if (!Number.isFinite(n) || n < 0 || (key === 'optionIndex' && !Number.isInteger(n))) {
+                return res.status(400).json({ success: false, error: `${key} must be a non-negative number.` });
             }
         }
         if (Array.isArray(body.options)) {

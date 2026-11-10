@@ -3,6 +3,7 @@ const crypto = require('crypto');
 const env = require('../config/env');
 const RevokedToken = require('../models/RevokedToken');
 const { isDbConnected } = require('../config/db');
+const { parseCookies, ACCESS_COOKIE, ADMIN_COOKIE } = require('../utils/pwaCookies');
 
 // In-memory fallback revocation cache for resilience if DB connection is intermittent.
 // 4A (F-01 residual): the set was unbounded — cap it (FIFO evict oldest) so a
@@ -60,16 +61,37 @@ async function revokeToken(token, reason = 'logout') {
     }
 }
 
-// User JWT Auth Middleware
+// User JWT Auth Middleware.
+// 4D (PWA cookie auth): accepts EITHER a valid Authorization: Bearer
+// header (existing behaviour FIRST, untouched — Android 30d tokens keep
+// working byte-for-byte) OR the `kamaal_access` cookie. The cookie path
+// runs the SAME checks: revocation, jwt.verify with JWT_SECRET, banned
+// check. Cookie tokens must additionally carry typ:'pwa-access' — an
+// Android 30d token placed in a cookie is NOT accepted as a cookie
+// session (the two transports stay separate). The opaque refresh token
+// is not a JWT, so jwt.verify fails on it -> 401, which is correct.
 async function authenticateUser(req, res, next) {
     const authHeader = req.headers['authorization'];
-    if (!authHeader) {
-        return res.status(401).json({ success: false, error: 'Authorization header required.' });
+    let token = null;
+    let viaCookie = false;
+    if (authHeader && typeof authHeader === 'string' && authHeader.trim()) {
+        // Bearer header present -> it owns the request (existing behaviour:
+        // a present-but-empty Bearer answers 'Token missing.', never falls
+        // back to the cookie).
+        token = authHeader.replace(/^Bearer\s+/i, '').trim();
+        if (!token) {
+            return res.status(401).json({ success: false, error: 'Token missing.' });
+        }
+    } else {
+        // No Bearer header at all -> try the PWA access cookie.
+        const cookieToken = parseCookies(req)[ACCESS_COOKIE];
+        if (cookieToken) {
+            token = String(cookieToken).trim();
+            viaCookie = true;
+        }
     }
-
-    const token = authHeader.replace(/^Bearer\s+/i, '').trim();
     if (!token) {
-        return res.status(401).json({ success: false, error: 'Token missing.' });
+        return res.status(401).json({ success: false, error: 'Authorization header required.' });
     }
 
     if (await isTokenRevoked(token)) {
@@ -78,6 +100,9 @@ async function authenticateUser(req, res, next) {
 
     try {
         const decoded = jwt.verify(token, env.JWT_SECRET);
+        if (viaCookie && decoded.typ !== 'pwa-access') {
+            return res.status(401).json({ success: false, error: 'Invalid or expired token.' });
+        }
         req.user = decoded;
         // v91 (BugHunter backend F11): banned users kept nearly full API
         // access because only a few handlers checked status. The check now
@@ -102,8 +127,24 @@ async function authenticateUser(req, res, next) {
 }
 
 // Admin Auth Middleware (Requires either valid signed admin JWT or verified admin credential)
+// 4D: ALSO accepts the `kamaal_admin` cookie (the admin JWT the admin
+// login sets). A cookie token is verified as an admin JWT ONLY — the
+// ADMIN_PASS direct-credential fallback applies to header tokens only,
+// never to a cookie value. Admin and user tokens never mix: an admin JWT
+// is verified here against ADMIN_JWT_SECRET only, and a user token is
+// never accepted by this middleware (nor an admin token by
+// authenticateUser, which verifies against JWT_SECRET only).
 async function requireAdminAuth(req, res, next) {
-    const rawToken = req.headers['x-admin-key'] || req.headers['authorization']?.replace(/^Bearer\s+/i, '');
+    const headerToken = req.headers['x-admin-key'] || req.headers['authorization']?.replace(/^Bearer\s+/i, '');
+    let rawToken = headerToken;
+    let viaCookie = false;
+    if (!rawToken || typeof rawToken !== 'string' || !rawToken.trim()) {
+        const cookieToken = parseCookies(req)[ADMIN_COOKIE];
+        if (cookieToken) {
+            rawToken = cookieToken;
+            viaCookie = true;
+        }
+    }
     if (!rawToken || typeof rawToken !== 'string') {
         return res.status(401).json({ success: false, error: 'Unauthorized: Admin authentication token required.' });
     }
@@ -130,7 +171,8 @@ async function requireAdminAuth(req, res, next) {
     // 2. Direct credential match against the configured admin secret only.
     // SECURITY FIX: removed hardcoded fallback tokens ('ADmin', ADMIN_USER).
     // Only env.ADMIN_PASS (a long random secret) or a valid admin JWT is accepted.
-    if (env.ADMIN_PASS && token === env.ADMIN_PASS) {
+    // 4D: header tokens only — a cookie value is never compared to ADMIN_PASS.
+    if (!viaCookie && env.ADMIN_PASS && token === env.ADMIN_PASS) {
         req.adminUser = env.ADMIN_USER;
         req.adminRole = 'admin';
         return next();

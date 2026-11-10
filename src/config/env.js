@@ -25,6 +25,17 @@ module.exports = {
     GEMINI_API_KEY: process.env.GEMINI_API_KEY || '',
     GEMINI_BACKUP_KEYS: process.env.GEMINI_BACKUP_KEYS || '',
     ADMIN_TOKEN_TTL_MS: 24 * 60 * 60 * 1000, // 24 hours
+    // 4D (PWA cookie auth) — session lifetimes. Access JWT in the
+    // `kamaal_access` cookie (minutes); opaque refresh token in the
+    // `kamaal_refresh` cookie (days). Defaults 15 / 30; override via env.
+    PWA_ACCESS_TTL_MINUTES: (() => {
+        const n = Number(process.env.PWA_ACCESS_TTL_MINUTES);
+        return Number.isFinite(n) && n > 0 ? n : 15;
+    })(),
+    PWA_REFRESH_TTL_DAYS: (() => {
+        const n = Number(process.env.PWA_REFRESH_TTL_DAYS);
+        return Number.isFinite(n) && n > 0 ? n : 30;
+    })(),
     // PHASE F — transport encryption: RSA-2048 PRIVATE key (PEM) used to
     // decrypt RSA-OAEP-SHA256-encrypted passwords on login/register, and to
     // derive the public key served at GET /api/auth/pubkey. NEVER commit a

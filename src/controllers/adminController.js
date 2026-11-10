@@ -11,6 +11,7 @@ const SupportMessage = require('../models/SupportMessage');
 const AppConfig = require('../models/AppConfig');
 const { revokeToken } = require('../middleware/auth');
 const { connectToDatabase, isDbConnected } = require('../config/db');
+const { ADMIN_COOKIE, setCookie, clearCookie, parseCookies } = require('../utils/pwaCookies');
 
 // Admin Login
 // 4A (M-P2-19): getUsers response allowlist (exported for the regression test).
@@ -38,6 +39,11 @@ async function adminLogin(req, res) {
             { expiresIn: '24h' }
         );
 
+        // 4D: ALSO set the admin JWT as an httpOnly cookie for the PWA
+        // admin panel (Path=/api/admin, 24h). The token in the body is
+        // kept byte-compatible for existing clients.
+        setCookie(res, req, ADMIN_COOKIE, sessionToken, '/api/admin', env.ADMIN_TOKEN_TTL_MS, true);
+
         return res.json({
             success: true,
             token: sessionToken,
@@ -49,12 +55,16 @@ async function adminLogin(req, res) {
     return res.status(401).json({ success: false, error: 'Invalid Admin Username or Password.' });
 }
 
-// Admin Logout
+// Admin Logout — 4D: also revokes a cookie-presented admin JWT and
+// clears the `kamaal_admin` cookie. (The route is admin-authenticated;
+// see adminRoutes.js.)
 async function adminLogout(req, res) {
-    const rawToken = req.headers['x-admin-key'] || req.headers['authorization']?.replace(/^Bearer\s+/i, '');
+    const rawToken = req.headers['x-admin-key'] || req.headers['authorization']?.replace(/^Bearer\s+/i, '')
+        || parseCookies(req)[ADMIN_COOKIE];
     if (rawToken && typeof rawToken === 'string') {
         await revokeToken(rawToken.trim(), 'admin_logout');
     }
+    clearCookie(res, req, ADMIN_COOKIE, '/api/admin', true);
     return res.json({ success: true, message: 'Logged out.' });
 }
 
