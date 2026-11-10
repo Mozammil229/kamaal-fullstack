@@ -240,6 +240,47 @@ describe('F-07 logout by refresh cookie', () => {
         const res = await call('POST', '/api/pwa/auth/logout', { jar: {} });
         assert.equal(res.status, 401);
     });
+
+    // W6 (4F re-hunt): the exact W4 probe shape, replayed at HTTP level.
+    // A refresh in another tab rotates the csrf cookie (T1 -> T2) while
+    // the client still holds the stale T1; the access then expires. The
+    // stale-header logout MUST 403 at the csrfGuard (before logoutAuth),
+    // and the fixed client flow — refresh first (CSRF-exempt), then retry
+    // logout with the fresh token — MUST land 200 and kill the refresh row.
+    it('W6 replay: stale-CSRF logout -> 403; refresh-first retry -> 200 and the refresh row dies', async () => {
+        const { jar } = await pwaLogin('pwauser4');
+        const staleCsrf = jar.kamaal_csrf;
+        const firstRefresh = jar.kamaal_refresh;
+        // Out-of-band rotation (another tab refreshed): csrf T1 -> T2,
+        // refresh R1 -> R2. The client cache still holds T1.
+        const rotated = await call('POST', '/api/pwa/auth/refresh', { jar });
+        assert.equal(rotated.status, 200);
+        assert.notEqual(jar.kamaal_csrf, staleCsrf);
+        assert.notEqual(jar.kamaal_refresh, firstRefresh);
+        // 15 idle minutes: the access token expires.
+        jar.kamaal_access = expiredAccess('pwauser4');
+        // Step 1 — the pre-fix client shape: stale header, live refresh.
+        const blocked = await call('POST', '/api/pwa/auth/logout', {
+            jar,
+            headers: { 'X-CSRF-Token': staleCsrf }
+        });
+        assert.equal(blocked.status, 403);
+        assert.equal(blocked.json.errorCode, 'CSRF_INVALID');
+        // Step 2 — the fixed client flow: refresh first, then retry logout
+        // with the fresh token from the jar (as the CSRF endpoint returns).
+        const refreshed = await call('POST', '/api/pwa/auth/refresh', { jar });
+        assert.equal(refreshed.status, 200);
+        const liveRefresh = jar.kamaal_refresh;
+        const res = await call('POST', '/api/pwa/auth/logout', {
+            jar,
+            headers: { 'X-CSRF-Token': jar.kamaal_csrf }
+        });
+        assert.equal(res.status, 200);
+        assert.equal(res.json.success, true);
+        // The refresh row the logout revoked is dead: presenting it 401s.
+        const again = await call('POST', '/api/pwa/auth/refresh', { jar: { kamaal_refresh: liveRefresh } });
+        assert.equal(again.status, 401);
+    });
 });
 
 // --- F-03: donut GET refresh is cron-secret-only ---------------------------

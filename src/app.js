@@ -169,6 +169,14 @@ app.use('/api/web', webRoutes);
 const pwaAuthRoutes = require('./routes/pwaAuthRoutes');
 app.use('/api/pwa/auth', pwaAuthRoutes);
 // ---- end 4D PWA auth mount ----------------------------------------------
+// 4F (S-F1) — the unauthenticated /api/register + /api/login aliases MUST
+// live BEFORE the socialRoutes mount: socialRoutes' blanket
+// router.use(authenticateUser) would 401 them before the handlers ever run
+// (same trap as the 4D pwaAuth mount above; the 4E mount check only asserted
+// NOT-404, so it could not see the shadowing).
+app.post('/api/register', authController.register);
+// BH-2 FIX: the /api/login alias gets the same rate limiter as /api/auth/login.
+app.post('/api/login', loginRateLimit, authController.login);
 app.use('/api', socialRoutes);
 // PHASE E — serve uploaded social media (server-randomized filenames only).
 app.use('/uploads', express.static(path.join(__dirname, '..', 'public', 'uploads')));
@@ -180,13 +188,11 @@ app.use('/api', crashReportRoutes);
 app.use('/api', winkRoutes);
 
 // 2. Direct Aliases required by Android Retrofit specifications:
-// - /api/register -> authController.register
-// - /api/login -> authController.login
+// - /api/register -> authController.register (moved ABOVE the socialRoutes
+//   mount in 4F/S-F1 — see there; the unauthenticated aliases cannot live here)
+// - /api/login -> authController.login (moved ABOVE the socialRoutes mount)
 // - /api/verify -> authController.verify
 // - /api/me -> authController.verify
-app.post('/api/register', authController.register);
-// BH-2 FIX: the /api/login alias gets the same rate limiter as /api/auth/login.
-app.post('/api/login', loginRateLimit, authController.login);
 // BH-1 FIX: /api/verify + /api/me aliases now require auth; verify() uses the
 // JWT username only (no ?username= fallback).
 app.get('/api/verify', authenticateUser, authController.verify);
