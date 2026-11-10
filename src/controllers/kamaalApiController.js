@@ -35,7 +35,19 @@ async function resolveKey(req) {
         err.status = 401; err.code = 'KEY_REQUIRED';
         throw err;
     }
-    const row = await KamaalApiKey.findOne({ tokenHash: apikeyCrypto.sha256(raw) }).lean();
+    // 4E F-09: the findOne DB call used to sit unguarded — a DB-layer
+    // failure threw a raw error whose message the chat/status catch
+    // returned verbatim (e.message), leaking internals (connection
+    // strings, driver errors). DB errors here now throw a sanitised
+    // 503 with the generic message, never the raw one.
+    let row;
+    try {
+        row = await KamaalApiKey.findOne({ tokenHash: apikeyCrypto.sha256(raw) }).lean();
+    } catch (_) {
+        const err = new Error('Database offline. Please try again.');
+        err.status = 503; err.code = 'DB_ERROR';
+        throw err;
+    }
     if (!row) {
         const err = new Error('Invalid API key.');
         err.status = 401; err.code = 'INVALID_KEY';

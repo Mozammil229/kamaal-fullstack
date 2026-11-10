@@ -34,7 +34,32 @@ function cronOrAdminAuth(req, res, next) {
 
 // GET  /api/donut/refresh — Vercel Cron (nightly 12 AM PKT, 19:00 UTC).
 // POST /api/donut/refresh — admin manual re-run (ADMIN_JWT).
-router.get('/donut/refresh', cronOrAdminAuth, donutController.refreshFeed);
+// 4E F-03: the GET used to accept cookie-presented admin auth too — but
+// GET /donut/refresh is STATE-CHANGING (YouTube Data API calls + DB
+// writes), and a top-level GET navigation SENDS Lax cookies, so any site
+// could trigger a refresh by getting an admin to visit a link (a GET
+// CSRF the csrfGuard cannot cover — it only guards POST/PUT/DELETE/
+// PATCH). The GET therefore accepts ONLY the cron secret now; cookie
+// auth is never accepted on it. The POST keeps cronOrAdminAuth (admin
+// manual re-run, CSRF-guarded when cookie-authenticated). Vercel Cron
+// invokes by GET with `Authorization: Bearer <CRON_SECRET>` — unchanged.
+function cronOnlyAuth(req, res, next) {
+    const secret = (env.CRON_SECRET || '').trim();
+    const auth = req.headers['authorization'] || '';
+    const token = auth.replace(/^Bearer\s+/i, '').trim();
+    if (secret && token && token.length === secret.length) {
+        try {
+            if (crypto.timingSafeEqual(Buffer.from(token), Buffer.from(secret))) {
+                return next();
+            }
+        } catch (_) {
+            // Lengths are equal-checked above; fall through to 401.
+        }
+    }
+    return res.status(401).json({ success: false, error: 'Unauthorized: cron secret required.' });
+}
+
+router.get('/donut/refresh', cronOnlyAuth, donutController.refreshFeed);
 router.post('/donut/refresh', cronOrAdminAuth, donutController.refreshFeed);
 
 module.exports = router;

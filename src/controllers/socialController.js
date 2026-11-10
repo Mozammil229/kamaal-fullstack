@@ -11,6 +11,7 @@
 // - Media filenames are server-randomized; client filename/MIME never trusted.
 const crypto = require('crypto');
 const { serverError } = require('../utils/serverError');
+const { setRetryAfter } = require('../utils/retryAfter');
 const mongoose = require('mongoose');
 const { connectToDatabase } = require('../config/db');
 const User = require('../models/User');
@@ -48,6 +49,14 @@ function writeRateLimited(username) {
         }
     }
     return false;
+}
+
+// 4E F-08 (W3): seconds until the oldest write in this user's window
+// falls out of it — the Retry-After for the 9 writeRateLimited sites.
+function writeRetryAfterSeconds(username) {
+    const kept = writeBuckets.get(username) || [];
+    if (!kept.length) return WRITE_WINDOW_MS / 1000;
+    return Math.max(1, Math.ceil((kept[0] + WRITE_WINDOW_MS - Date.now()) / 1000));
 }
 
 function authedUsername(req) {
@@ -224,6 +233,7 @@ async function createThread(req, res) {
     const me = authedUsername(req);
     if (!me) return res.status(401).json({ success: false, error: 'Authentication required.' });
     if (writeRateLimited(me)) {
+        setRetryAfter(res, writeRetryAfterSeconds(me));
         return res.status(429).json({ success: false, error: 'You are sending too quickly. Please wait a bit and try again.' });
     }
     const body = req.body || {};
@@ -339,6 +349,7 @@ async function sendMessage(req, res) {
     const me = authedUsername(req);
     if (!me) return res.status(401).json({ success: false, error: 'Authentication required.' });
     if (writeRateLimited(me)) {
+        setRetryAfter(res, writeRetryAfterSeconds(me));
         return res.status(429).json({ success: false, error: 'You are sending too quickly. Please wait a bit and try again.' });
     }
     if (!validObjectId(req.params.id)) return badId(res);
@@ -440,6 +451,7 @@ async function updateGroupMembers(req, res) {
     const me = authedUsername(req);
     if (!me) return res.status(401).json({ success: false, error: 'Authentication required.' });
     if (writeRateLimited(me)) {
+        setRetryAfter(res, writeRetryAfterSeconds(me));
         return res.status(429).json({ success: false, error: 'You are sending too quickly. Please wait a bit and try again.' });
     }
     if (!validObjectId(req.params.id)) return badId(res);
@@ -534,6 +546,7 @@ async function editMessage(req, res) {
     const me = authedUsername(req);
     if (!me) return res.status(401).json({ success: false, error: 'Authentication required.' });
     if (writeRateLimited(me)) {
+        setRetryAfter(res, writeRetryAfterSeconds(me));
         return res.status(429).json({ success: false, error: 'You are sending too quickly. Please wait a bit and try again.' });
     }
     const ctx = await loadMemberThread(req, res);
@@ -561,6 +574,7 @@ async function deleteMessage(req, res) {
     const me = authedUsername(req);
     if (!me) return res.status(401).json({ success: false, error: 'Authentication required.' });
     if (writeRateLimited(me)) {
+        setRetryAfter(res, writeRetryAfterSeconds(me));
         return res.status(429).json({ success: false, error: 'You are sending too quickly. Please wait a bit and try again.' });
     }
     const ctx = await loadMemberThread(req, res);
@@ -591,6 +605,7 @@ async function reactMessage(req, res) {
     const me = authedUsername(req);
     if (!me) return res.status(401).json({ success: false, error: 'Authentication required.' });
     if (writeRateLimited(me)) {
+        setRetryAfter(res, writeRetryAfterSeconds(me));
         return res.status(429).json({ success: false, error: 'You are sending too quickly. Please wait a bit and try again.' });
     }
     const ctx = await loadMemberThread(req, res);
@@ -687,6 +702,7 @@ async function createPost(req, res) {
     const me = authedUsername(req);
     if (!me) return res.status(401).json({ success: false, error: 'Authentication required.' });
     if (writeRateLimited(me)) {
+        setRetryAfter(res, writeRetryAfterSeconds(me));
         return res.status(429).json({ success: false, error: 'You are posting too quickly. Please wait a bit and try again.' });
     }
     const text = String((req.body && req.body.text) || '').trim().slice(0, 1000);
@@ -722,6 +738,7 @@ async function createStory(req, res) {
     const me = authedUsername(req);
     if (!me) return res.status(401).json({ success: false, error: 'Authentication required.' });
     if (writeRateLimited(me)) {
+        setRetryAfter(res, writeRetryAfterSeconds(me));
         return res.status(429).json({ success: false, error: 'You are posting too quickly. Please wait a bit and try again.' });
     }
     if (!req.file) return res.status(400).json({ success: false, error: 'A photo is required for a story.' });
@@ -796,6 +813,7 @@ async function addContact(req, res) {
     const me = authedUsername(req);
     if (!me) return res.status(401).json({ success: false, error: 'Authentication required.' });
     if (writeRateLimited(me)) {
+        setRetryAfter(res, writeRetryAfterSeconds(me));
         return res.status(429).json({ success: false, error: 'You are sending too quickly. Please wait a bit and try again.' });
     }
     const contactUsername = String((req.body && req.body.contactUsername) || '').trim().toLowerCase();

@@ -983,12 +983,25 @@
         let radarInterval = null;
         let selectedUser = null;
 
+        // 4E F-02: the server CSRF guard now enforces on the `kamaal_admin`
+        // cookie too, so every mutating admin call must carry the
+        // double-submit header. The `kamaal_csrf` cookie is NOT httpOnly
+        // (set/rotated by POST /api/admin/login), so same-origin JS can
+        // read it here. All panel fetches go through getAuthHeaders()
+        // (admin-chats.js reuses it), so this one place covers them all.
+        function getCsrfToken() {
+            const match = document.cookie.match(/(?:^|;\s*)kamaal_csrf=([^;]*)/);
+            return match ? decodeURIComponent(match[1]) : '';
+        }
+
         function getAuthHeaders() {
             const headers = { 'Content-Type': 'application/json' };
             if (adminAuthToken) {
                 headers['Authorization'] = `Bearer ${adminAuthToken}`;
                 headers['x-admin-key'] = adminAuthToken;
             }
+            const csrf = getCsrfToken();
+            if (csrf) headers['X-CSRF-Token'] = csrf;
             return headers;
         }
 

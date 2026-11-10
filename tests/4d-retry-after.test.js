@@ -76,4 +76,29 @@ describe('bespoke limiter Retry-After (W4)', () => {
         }
         assert.equal(sites, 10, `expected 10 bespoke Retry-After sites, got ${sites}`);
     });
+
+    // 4E F-08 (W3): the hand-rolled controller 429s got Retry-After too —
+    // social write limiter (9 sites via writeRateLimited), message reply
+    // limiter (1), wink throttle (1), crash-report DB-count guard (1),
+    // AI daily budget (1, seconds until midnight Asia/Karachi). These go
+    // through the shared src/utils/retryAfter.js helper instead of the
+    // route-level setHeader call, so they are counted by helper use.
+    it('all 13 hand-rolled controller 429 sites set Retry-After (static)', () => {
+        const files = [
+            'src/controllers/socialController.js',
+            'src/controllers/messageController.js',
+            'src/controllers/winkController.js',
+            'src/controllers/crashReportController.js',
+            'src/controllers/aiController.js'
+        ];
+        let sites = 0;
+        for (const f of files) {
+            const src = fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
+            const hits = src.match(/setRetryAfter\(res,/g) || [];
+            const returns = src.match(/return res\.status\(429\)/g) || [];
+            assert.equal(hits.length, returns.length, `${f}: every 429 return needs a setRetryAfter call (${hits.length} helper calls vs ${returns.length} returns)`);
+            sites += hits.length;
+        }
+        assert.equal(sites, 13, `expected 13 hand-rolled controller Retry-After sites, got ${sites}`);
+    });
 });

@@ -7,6 +7,7 @@
 // - User replies are rate-limited (30/hour) and capped at 2000 chars.
 const crypto = require('crypto');
 const { serverError } = require('../utils/serverError');
+const { setRetryAfter } = require('../utils/retryAfter');
 const mongoose = require('mongoose');
 const { connectToDatabase } = require('../config/db');
 const User = require('../models/User');
@@ -44,6 +45,14 @@ function replyRateLimited(username) {
         }
     }
     return false;
+}
+
+// 4E F-08 (W3): seconds until the oldest reply in this user's window
+// falls out of it — the Retry-After for the reply limiter.
+function replyRetryAfterSeconds(username) {
+    const kept = replyBuckets.get(username) || [];
+    if (!kept.length) return REPLY_WINDOW_MS / 1000;
+    return Math.max(1, Math.ceil((kept[0] + REPLY_WINDOW_MS - Date.now()) / 1000));
 }
 
 function cleanBody(raw) {
@@ -136,6 +145,7 @@ async function sendMessage(req, res) {
     if (error) return res.status(400).json({ success: false, error });
 
     if (replyRateLimited(username)) {
+        setRetryAfter(res, replyRetryAfterSeconds(username));
         return res.status(429).json({
             success: false,
             error: 'You are sending messages too quickly. Please wait a little and try again.'

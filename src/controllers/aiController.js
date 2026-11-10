@@ -1,5 +1,6 @@
 const AppConfig = require('../models/AppConfig');
 const { serverError } = require('../utils/serverError');
+const { setRetryAfter, secondsUntilMidnightAsiaKarachi } = require('../utils/retryAfter');
 const User = require('../models/User');
 const { generateAIReply } = require('../services/aiProviderChain');
 const aiUsage = require('../services/aiUsageService');
@@ -148,6 +149,9 @@ async function chat(req, res) {
     if (username && dbUser && !aiUsage.isUnlimited(dbUser)) {
         const left = await aiUsage.hasBudgetLeft(username, dbUser);
         if (!left) {
+            // 4E F-08 (W3): Retry-After = seconds until midnight
+            // Asia/Karachi, when the free daily budget resets.
+            setRetryAfter(res, secondsUntilMidnightAsiaKarachi());
             return res.status(429).json({
                 success: false,
                 code: 'AI_DAILY_LIMIT',

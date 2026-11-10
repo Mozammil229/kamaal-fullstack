@@ -310,7 +310,13 @@ describe('admin cookie', () => {
         assert.equal(users.status, 200);
         assert.equal(users.json.success, true);
 
-        const out = await call('POST', '/api/admin/logout', { jar });
+        // 4E F-02: the guard now enforces on the admin cookie too, so the
+        // cookie-authenticated logout POST must carry X-CSRF-Token — exactly
+        // what the real panel sends via getAuthHeaders() in admin.html.
+        const out = await call('POST', '/api/admin/logout', {
+            jar,
+            headers: { 'X-CSRF-Token': jar.kamaal_csrf }
+        });
         assert.equal(out.status, 200);
 
         // Revoked: the old admin cookie is dead.

@@ -3,21 +3,27 @@
 // 4D (PWA cookie auth) — CSRF guard (double-submit cookie pattern).
 //
 // Enforces ONLY when the request is cookie-authenticated (the
-// `kamaal_access` cookie is present). Bearer-authenticated requests carry
-// no cookie the browser would attach cross-site, so they are naturally
-// CSRF-resistant and SKIP the check — the Android app never sends the
-// header and must never 403. Requests with no cookie at all also skip:
-// unauthenticated public routes are unaffected.
+// `kamaal_access` OR the `kamaal_admin` cookie is present — 4E F-02:
+// the admin panel is same-origin, so the browser attaches the admin
+// cookie to its mutating calls too, and a cross-site POST from an evil
+// page would carry it just the same). Bearer-authenticated requests
+// carry no cookie the browser would attach cross-site, so they are
+// naturally CSRF-resistant and SKIP the check — the Android app never
+// sends the header and must never 403. Requests with no cookie at all
+// also skip: unauthenticated public routes are unaffected.
 //
 // Exempt (session-establishing, no authenticated session exists yet):
 //   POST /api/pwa/auth/login, POST /api/pwa/auth/refresh,
 //   POST /api/admin/login, POST /api/auth/login, POST /api/login.
 // Everything else state-changing (POST/PUT/DELETE/PATCH) under /api with
-// an access cookie requires header X-CSRF-Token to equal the
+// an access or admin cookie requires header X-CSRF-Token to equal the
 // `kamaal_csrf` cookie value (compared on SHA-256 digests, timing-safe).
+// The admin panel sends the header via getAuthHeaders() in public/admin.html
+// (and public/js/admin-chats.js reuses it); the PWA fetches the value from
+// GET /api/pwa/auth/csrf.
 
 const crypto = require('crypto');
-const { parseCookies, ACCESS_COOKIE, CSRF_COOKIE } = require('../utils/pwaCookies');
+const { parseCookies, ACCESS_COOKIE, ADMIN_COOKIE, CSRF_COOKIE } = require('../utils/pwaCookies');
 
 const STATE_METHODS = new Set(['POST', 'PUT', 'DELETE', 'PATCH']);
 
@@ -33,7 +39,7 @@ const EXEMPT_PATHS = new Set([
 function csrfGuard(req, res, next) {
     if (!STATE_METHODS.has(req.method)) return next();
     const cookies = parseCookies(req);
-    if (!cookies[ACCESS_COOKIE]) return next(); // Bearer / anonymous: skip.
+    if (!cookies[ACCESS_COOKIE] && !cookies[ADMIN_COOKIE]) return next(); // Bearer / anonymous: skip.
     if (EXEMPT_PATHS.has(`${req.method} ${req.path}`)) return next();
 
     const header = req.headers['x-csrf-token'];

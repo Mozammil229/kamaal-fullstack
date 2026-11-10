@@ -6,6 +6,7 @@
 // (see v66-ledger.md: a charge later is a server constant, not an app change).
 
 const winkService = require('../services/winkService');
+const { setRetryAfter } = require('../utils/retryAfter');
 const { WinkError } = winkService;
 
 // Per-user in-memory throttle, same best-effort pattern as loginRateLimit
@@ -24,6 +25,8 @@ function winkRateLimit(max, windowMs) {
         buckets.set(key, entry);
         if (buckets.size > 5000) buckets.clear();
         if (entry.count > max) {
+            // 4E F-08 (W3): Retry-After = seconds until this bucket resets.
+            setRetryAfter(res, (entry.start + windowMs - Date.now()) / 1000);
             return res.status(429).json({
                 success: false,
                 error: 'Too many enhance requests. Try again later.',

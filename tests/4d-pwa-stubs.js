@@ -119,6 +119,16 @@ const stubRefreshToken = {
         Object.assign(row, (update && update.$set) || {});
         return { modifiedCount: 1 };
     },
+    // Atomic claim for the 4E F-04 rotation: matches the filter (incl.
+    // revokedAt:null + replacedByHash:null) and applies $set in one step;
+    // returns the updated row ({ new:true }) or null when no live row
+    // matched — the same contract as Mongoose findOneAndUpdate.
+    async findOneAndUpdate(filter, update, options) {
+        const row = refreshRows.find((r) => matches(r, filter));
+        if (!row) return null;
+        Object.assign(row, (update && update.$set) || {});
+        return options && options.new ? row : row;
+    },
     async updateMany(filter, update) {
         let n = 0;
         for (const row of refreshRows.filter((r) => matches(r, filter))) {

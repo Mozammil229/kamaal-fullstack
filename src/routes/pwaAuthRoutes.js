@@ -8,7 +8,6 @@
 const express = require('express');
 const router = express.Router();
 const pwaAuthController = require('../controllers/pwaAuthController');
-const { authenticateUser } = require('../middleware/auth');
 const { rateLimit } = require('../middleware/rateLimit');
 
 // Login throttle: 10/min per IP AND 5/min per username (shared in-memory
@@ -29,8 +28,20 @@ const pwaLoginUserLimit = rateLimit({
 });
 
 router.post('/login', pwaLoginIpLimit, pwaLoginUserLimit, pwaAuthController.login);
-router.post('/refresh', pwaAuthController.refresh);
-router.post('/logout', authenticateUser, pwaAuthController.logout);
-router.post('/logout-everywhere', authenticateUser, pwaAuthController.logoutEverywhere);
+// 4E F-05: refresh had no limiter — a stolen refresh token could be
+// hammered forever. 30/min per IP (shared rateLimit, so 429s carry
+// Retry-After). Legit clients refresh at most once per 15 min.
+const pwaRefreshLimit = rateLimit({
+    windowMs: 60 * 1000,
+    max: 30,
+    message: 'Too many refresh attempts. Try again in a minute.'
+});
+router.post('/refresh', pwaRefreshLimit, pwaAuthController.refresh);
+// 4E F-01/F-02: GET /api/pwa/auth/csrf — hands the double-submit CSRF
+// value to an already-authenticated (cookie) session. GET, so the CSRF
+// guard does not apply to it.
+router.get('/csrf', pwaAuthController.getCsrfToken);
+router.post('/logout', pwaAuthController.logoutAuth, pwaAuthController.logout);
+router.post('/logout-everywhere', pwaAuthController.logoutAuth, pwaAuthController.logoutEverywhere);
 
 module.exports = router;

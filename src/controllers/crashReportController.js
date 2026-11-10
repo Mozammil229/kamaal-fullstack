@@ -1,5 +1,6 @@
 const CrashReport = require('../models/CrashReport');
 const { connectToDatabase, isDbConnected } = require('../config/db');
+const { setRetryAfter } = require('../utils/retryAfter'); // 4E F-08 (W3)
 
 // ---- Server-side sanitization ----
 // The app sends raw crash text; strip anything that looks like a secret before
@@ -60,6 +61,10 @@ async function submitCrashReport(req, res) {
             createdAt: { $gte: new Date(Date.now() - RATE_WINDOW_MS) }
         });
         if (recent >= RATE_MAX) {
+            // 4E F-08 (W3): DB-count guard over a 1h window — the window
+            // fully resets in at most RATE_WINDOW_MS (the oldest report
+            // falls out sooner; 3600 is the safe upper bound).
+            setRetryAfter(res, RATE_WINDOW_MS / 1000);
             return res.status(429).json({ success: false, error: 'Too many crash reports. Try again later.' });
         }
 

@@ -33,6 +33,7 @@ const {
     ACCESS_COOKIE,
     REFRESH_COOKIE,
     CSRF_COOKIE,
+    ADMIN_COOKIE,
     parseCookies,
     setCookie,
     clearCookie
@@ -212,10 +213,25 @@ function createPwaAuthHandlers(deps = {}) {
             const newValue = crypto.randomBytes(32).toString('hex');
             const newHash = sha256Hex(newValue);
             const now = new Date();
-            await RefreshTokenModel.updateOne(
-                { tokenHash: oldHash },
-                { $set: { revokedAt: now, replacedByHash: newHash } }
+            // 4E F-04: ATOMIC rotation — the old check-then-act (findOne,
+            // then updateOne) let two concurrent presenters of the same
+            // token both pass the live check and both mint a session.
+            // findOneAndUpdate claims the row ONLY while it is still live
+            // (revokedAt:null AND replacedByHash:null) in a single atomic
+            // step. A null return means another presenter claimed it first
+            // — treat that as reuse and revoke the whole family.
+            const claimed = await RefreshTokenModel.findOneAndUpdate(
+                { tokenHash: oldHash, revokedAt: null, replacedByHash: null },
+                { $set: { revokedAt: now, replacedByHash: newHash } },
+                { new: true }
             );
+            if (!claimed) {
+                await RefreshTokenModel.updateMany(
+                    { familyId: row.familyId },
+                    { $set: { revokedAt: new Date() } }
+                );
+                return res.status(401).json({ success: false, error: GENERIC_SESSION_ERROR });
+            }
             await RefreshTokenModel.create({
                 tokenHash: newHash,
                 userId: row.userId,
@@ -239,6 +255,91 @@ function createPwaAuthHandlers(deps = {}) {
         if (bearer && typeof bearer === 'string' && bearer.trim()) return bearer.trim();
         const cookie = parseCookies(req)[ACCESS_COOKIE];
         return cookie || null;
+    }
+
+    // GET /api/pwa/auth/csrf — 4E F-01/F-02: the PWA (cross-origin) cannot
+    // read its own httpOnly session cookies, and the double-submit CSRF
+    // cookie is the one value the client JS needs for mutating calls.
+    // Requires EITHER a valid `kamaal_access` cookie (pwa-access JWT) OR
+    // a valid `kamaal_admin` cookie (admin JWT); 401 otherwise. Returns
+    // the current `kamaal_csrf` cookie value; if none is present, mints a
+    // fresh value, sets it as the `kamaal_csrf` cookie (same attributes as
+    // the login path) and returns it. GET, so the CSRF guard never applies
+    // to this route. The returned value is a CSRF token, not a session
+    // token — it is useless without the matching session cookie.
+    async function getCsrfToken(req, res) {
+        const cookies = parseCookies(req);
+        let authed = false;
+        const access = cookies[ACCESS_COOKIE];
+        if (access) {
+            try {
+                const decoded = jwt.verify(access, require('../config/env').JWT_SECRET);
+                if (decoded && decoded.typ === 'pwa-access') authed = true;
+            } catch (_) { /* not a valid access session — try admin */ }
+        }
+        if (!authed) {
+            const admin = cookies[ADMIN_COOKIE];
+            if (admin) {
+                try {
+                    const decoded = jwt.verify(admin, require('../config/env').ADMIN_JWT_SECRET);
+                    if (decoded && decoded.role === 'admin') authed = true;
+                } catch (_) { /* not a valid admin session */ }
+            }
+        }
+        if (!authed) {
+            return res.status(401).json({ success: false, error: GENERIC_SESSION_ERROR });
+        }
+        let csrfValue = cookies[CSRF_COOKIE];
+        if (!csrfValue || typeof csrfValue !== 'string') {
+            csrfValue = crypto.randomBytes(32).toString('hex');
+            const refreshMs = refreshTtlDays() * 24 * 60 * 60 * 1000;
+            setCookie(res, req, CSRF_COOKIE, csrfValue, '/', refreshMs, false);
+        }
+        return res.json({ success: true, csrfToken: csrfValue });
+    }
+
+    // 4E F-07 — logout auth: the normal access-token path FIRST (same
+    // checks as authenticateUser: revocation, jwt.verify, pwa-access typ
+    // for cookie tokens), then a REFRESH-COOKIE fallback. The access token
+    // lives only 15 min, so after 15 idle minutes a plain logout 401d and
+    // the 30-day refresh row survived. A live refresh row proves the
+    // session just as well for the narrow purpose of killing it: if the
+    // access token is expired/invalid BUT a valid refresh cookie is
+    // present, the logout still revokes and clears cookies with 200.
+    // A banned-user check is deliberately skipped here — logging out is
+    // always allowed.
+    async function logoutAuth(req, res, next) {
+        const { isTokenRevoked } = require('../middleware/auth');
+        const access = currentAccessToken(req);
+        if (access) {
+            try {
+                const viaCookie = !req.headers['authorization'];
+                if (!(await isTokenRevoked(access))) {
+                    const decoded = jwt.verify(access, require('../config/env').JWT_SECRET);
+                    if (!viaCookie || decoded.typ === 'pwa-access') {
+                        req.user = decoded;
+                        return next();
+                    }
+                }
+            } catch (_) { /* fall through to the refresh-cookie path */ }
+        }
+        const presented = parseCookies(req)[REFRESH_COOKIE];
+        if (presented) {
+            try {
+                const row = await RefreshTokenModel.findOne({ tokenHash: sha256Hex(presented) });
+                const live = row && !row.revokedAt && !row.replacedByHash
+                    && !(row.expiresAt && new Date(row.expiresAt).getTime() <= Date.now());
+                if (live) {
+                    const user = await UserModel.findById(row.userId);
+                    if (user) {
+                        req.user = { username: user.username };
+                        req.refreshAuth = true;
+                        return next();
+                    }
+                }
+            } catch (_) { /* fall through to 401 */ }
+        }
+        return res.status(401).json({ success: false, error: 'Authorization header required.' });
     }
 
     // POST /api/pwa/auth/logout — requires auth (route middleware).
@@ -286,7 +387,7 @@ function createPwaAuthHandlers(deps = {}) {
         return res.json({ success: true, message: 'Logged out everywhere.' });
     }
 
-    return { login, refresh, logout, logoutEverywhere };
+    return { login, refresh, getCsrfToken, logoutAuth, logout, logoutEverywhere };
 }
 
 // Default handlers (real models, real DB) — what the routes file uses.

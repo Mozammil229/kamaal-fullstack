@@ -41,10 +41,16 @@ function isSecureRequest(req) {
 }
 
 function baseOptions(req, path, maxAgeMs, httpOnly) {
+    const secure = isSecureRequest(req);
     return {
         httpOnly,
-        secure: isSecureRequest(req),
-        sameSite: 'lax',
+        secure,
+        // 4E F-01: cross-origin cookie auth needs SameSite=None on HTTPS
+        // (Lax cookies are NOT sent on cross-site fetch/XHR, so the PWA
+        // on its own host could never authenticate). SameSite=None
+        // REQUIRES Secure — both stay tied to this one condition, so
+        // plain-HTTP local dev keeps Lax + no Secure, unchanged.
+        sameSite: secure ? 'none' : 'lax',
         path,
         maxAge: maxAgeMs
     };

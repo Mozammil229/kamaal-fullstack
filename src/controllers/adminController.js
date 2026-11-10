@@ -11,7 +11,7 @@ const SupportMessage = require('../models/SupportMessage');
 const AppConfig = require('../models/AppConfig');
 const { revokeToken } = require('../middleware/auth');
 const { connectToDatabase, isDbConnected } = require('../config/db');
-const { ADMIN_COOKIE, setCookie, clearCookie, parseCookies } = require('../utils/pwaCookies');
+const { ADMIN_COOKIE, CSRF_COOKIE, setCookie, clearCookie, parseCookies } = require('../utils/pwaCookies');
 
 // Admin Login
 // 4A (M-P2-19): getUsers response allowlist (exported for the regression test).
@@ -43,6 +43,11 @@ async function adminLogin(req, res) {
         // admin panel (Path=/api/admin, 24h). The token in the body is
         // kept byte-compatible for existing clients.
         setCookie(res, req, ADMIN_COOKIE, sessionToken, '/api/admin', env.ADMIN_TOKEN_TTL_MS, true);
+        // 4E F-02: ALSO set/rotate the double-submit CSRF cookie, so
+        // admin sessions have a CSRF value for the guard (which now
+        // enforces on the admin cookie too). Same helper as user login:
+        // NOT httpOnly (the panel JS must read it), Path=/, 24h.
+        setCookie(res, req, CSRF_COOKIE, crypto.randomBytes(32).toString('hex'), '/', env.ADMIN_TOKEN_TTL_MS, false);
 
         return res.json({
             success: true,
