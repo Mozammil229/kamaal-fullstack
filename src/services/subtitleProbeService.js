@@ -10,7 +10,11 @@
 // API facts verified at build time (2026-11-08) against the official docs:
 // - Transcribe guide (ai.google.dev/gemini-api/docs/transcribe): REST
 //   POST /v1beta/interactions, body model "models/gemini-3.5-transcribe",
-//   input [{type:"file", file_uri}], generation_config.transcription_config
+//   input [{type:"audio", uri, mime_type}] — LIVE-VERIFIED 2026-11-09:
+//   the guide's REST snippet still shows {type:"file", file_uri} but the
+//   live API 400s on BOTH ('file' type not supported; 'file_uri' unknown
+//   parameter). Google AI Studio docs (transcribe + audio guides) and the
+//   SDKs agree on audio/uri/mime_type. generation_config.transcription_config
 //   .mode {type:"verbatim", timestamp_granularities:["word"]}; response
 //   output_text + steps[].content[].annotations[] word_info with
 //   start_offset/end_offset strings like "0.100s". No language_codes
@@ -265,7 +269,7 @@ async function transcribeFile(apiKey, fileUri, fetchImpl, signal) {
         },
         body: JSON.stringify({
             model: `models/${PROBE_MODEL}`,
-            input: [{ type: 'file', file_uri: fileUri }],
+            input: [{ type: 'audio', uri: fileUri, mime_type: WAV_MIME }],
             generation_config: {
                 transcription_config: {
                     mode: { type: 'verbatim', timestamp_granularities: ['word'] }

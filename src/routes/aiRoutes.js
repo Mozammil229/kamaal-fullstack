@@ -30,6 +30,35 @@ function aiChatRateLimit(req, res, next) {
 router.post('/chat', authenticateUser, aiChatRateLimit, aiController.chat);
 // Alias used by some Android client builds (ApiService.chatWithAi)
 router.post('/ai/chat', authenticateUser, aiChatRateLimit, aiController.chat);
+// FLOW ENGINE X P2 — POST /api/flow/generate: AI Natural Language Generator.
+// USER route (NOT admin): JWT via authenticateUser. The server builds the
+// system prompt (flowGenerateService) — the client never supplies it — and
+// reuses the existing provider chain. CREDIT-FREE (plan §9): no credit
+// check/deduction anywhere on this route; the 20/min per-user bucket below
+// (same shape as aiChatRateLimit) is the only quota guard. The route never
+// stores the request/flow and never logs request bodies. Envelope:
+// {success, type:"flow", flow} | {type:"clarify", question} |
+// {type:"error", error}. A malformed AI output is {type:"error"} — never
+// a half-flow. Rollback: disable this route; the app falls back to
+// "generation unavailable" copy.
+const flowBuckets = new Map();
+function flowGenerateRateLimit(req, res, next) {
+    const key = req.user?.username || req.ip || 'unknown';
+    const now = Date.now();
+    const windowMs = 60 * 1000;
+    const max = 20;
+    let entry = flowBuckets.get(key);
+    if (!entry || now - entry.start > windowMs) entry = { start: now, count: 0 };
+    entry.count += 1;
+    flowBuckets.set(key, entry);
+    if (flowBuckets.size > 5000) flowBuckets.clear();
+    if (entry.count > max) {
+        return res.status(429).json({ success: false, error: 'Rate limit exceeded. Please slow down.' });
+    }
+    next();
+}
+const flowController = require('../controllers/flowController');
+router.post('/flow/generate', authenticateUser, flowGenerateRateLimit, flowController.generateFlow);
 // VOXPILOT PHASE 2 (v58) — POST /api/live/token: mints a short-lived,
 // single-use Gemini Live ephemeral token (liveController). The server key
 // never reaches the phone. 10 mints/min per user: a reconnect re-mints,

@@ -20,6 +20,10 @@ const crashReportRoutes = require('./routes/crashReportRoutes');
 const winkRoutes = require('./routes/winkRoutes');
 // S5 C1 PROBE — TEMPORARY route (delete once C1 is decided).
 const subtitleProbeRoutes = require('./routes/subtitleProbeRoutes');
+// PATCHER SITE — web users (2026-11-09): POST /api/web/register, POST
+// /api/web/login, GET /api/web/me (web JWT), /api/web/admin/* (admin JWT).
+// Separate collection/auth from the app — see src/models/WebUser.js.
+const webRoutes = require('./routes/webRoutes');
 // Donut feed (YouTube Data API nightly cache): GET /api/donut/feed,
 // GET|POST /api/donut/refresh (Vercel Cron secret or admin auth).
 const donutRoutes = require('./routes/donutRoutes');
@@ -32,6 +36,8 @@ const deviceRoutes = require('./routes/deviceRoutes');
 const referralRoutes = require('./routes/referralRoutes');
 // PHASE F — server-side patcher: POST /api/patch/request, POST /api/patch/apply.
 const patchRoutes = require('./routes/patchRoutes');
+// FLOW ENGINE X P13 — cross-device sync: /api/flow/sync/*, /api/flow/templates/*, /api/flow/workspaces/*.
+const flowSyncRoutes = require('./routes/flowSyncRoutes');
 // PHASE E — Social app: threads/messages/feed/stories/contacts (blueprint E1/E2/E3/E5).
 const socialRoutes = require('./routes/socialRoutes');
 // MULTI-AGENT P1 — ops audit trail: POST/GET /api/ops/audit (internal key
@@ -74,6 +80,8 @@ app.use('/api/device', deviceRoutes);
 app.use('/api/referral', referralRoutes);
 // PHASE F — server-side patch recipes (methods live on the server, not in the APK).
 app.use('/api/patch', patchRoutes);
+// FLOW ENGINE X P13 — cross-device sync (opaque encrypted blobs + allowlisted metadata).
+app.use('/api/flow', flowSyncRoutes);
 // PHASE E — social: /api/social/* + /api/user/fcm-token (auth-only, JWT identity).
 // NOTE: donutRoutes is mounted BEFORE socialRoutes on purpose — socialRoutes
 // has a blanket router.use(authenticateUser) that rejects ANY non-user-JWT
@@ -94,6 +102,13 @@ app.use('/api', opsRoutes);
 // would 401 the admin x-admin-key Bearer before requireAdminAuth ever runs
 // (same trap as donut/news/ops — see their mount comments).
 app.use('/api', subtitleProbeRoutes);
+// PATCHER SITE — web auth. Mounted at /api/web (not /api — the /api
+// aliases below must keep serving the APP auth) and BEFORE socialRoutes
+// on purpose (same trap as probe/donut/news/ops): socialRoutes' blanket
+// router.use(authenticateUser) would 401 the web JWT on /api/web/me and
+// the admin-JWT Bearer on /api/web/admin/* before the web middleware
+// ever runs.
+app.use('/api/web', webRoutes);
 app.use('/api', socialRoutes);
 // PHASE E — serve uploaded social media (server-randomized filenames only).
 app.use('/uploads', express.static(path.join(__dirname, '..', 'public', 'uploads')));
