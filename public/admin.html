@@ -1182,15 +1182,16 @@
             if (tabId === 'crashReportsTab') loadCrashReports();
         }
 
-        // 2-Second Live Telemetry Radar
+        // 30-Second Live Telemetry Radar (was 2s — cut to save Vercel Fluid CPU; paused while tab hidden)
         function startLiveRadar() {
             fetchTelemetry();
             fetchUsers();
             if (radarInterval) clearInterval(radarInterval);
             radarInterval = setInterval(() => {
+                if (document.hidden) return;
                 fetchTelemetry();
                 fetchUsers(true);
-            }, 2000);
+            }, 30000);
         }
 
         async function fetchTelemetry() {
