@@ -172,6 +172,60 @@ async function authorizePatch(req, res) {
     }
 }
 
+// P-1 (D-12b, server confirm): confirm a patch authorization minted by
+// authorize-patch. Charge-after-authorize: the credit was ALREADY deducted
+// at authorize time — this endpoint NEVER deducts and NEVER refunds
+// (D-12c refund policy is still open, decided later). Idempotent by
+// construction: a repeat confirm returns 200 alreadyConfirmed instead of
+// an error, so a client retry after a dropped response can never look
+// like a failure. NOTE on 404 vs 410: rows whose TTL already fired are
+// DELETED by Mongo, so a long-expired token presents as 404, not 410;
+// 410 only fires while the row still exists with a past expiresAt.
+async function confirmPatch(req, res) {
+    await connectToDatabase();
+    if (!isDbConnected()) {
+        return res.status(503).json({ success: false, confirmed: false, error: 'Database offline. Confirmation requires authoritative database connection.' });
+    }
+    // Username comes from the verified JWT (route uses authenticateUser) —
+    // never from the body — so one user cannot confirm another user's
+    // authorization.
+    const username = req.user?.username;
+    if (!username) return res.status(401).json({ success: false, confirmed: false, error: 'Authentication required.' });
+
+    const authToken = typeof req.body?.authToken === 'string' ? req.body.authToken.trim() : '';
+    if (!authToken) return res.status(400).json({ success: false, confirmed: false, error: 'authToken is required.' });
+
+    try {
+        const PatchAuthorization = require('../models/PatchAuthorization');
+        // Atomic flip: only a live (unused + unexpired) row flips, guarded
+        // on used:false + expiresAt > now in ONE update — two concurrent
+        // confirms cannot both win. The loser falls through to the read
+        // below and gets alreadyConfirmed.
+        const flipped = await PatchAuthorization.findOneAndUpdate(
+            { token: authToken, username, used: false, expiresAt: { $gt: new Date() } },
+            { $set: { used: true } },
+            { new: true }
+        );
+        if (flipped) {
+            return res.json({ success: true, confirmed: true });
+        }
+        // Not flipped: distinguish the three states. A wrong-user token
+        // reads as 404 (row lookup is scoped to the JWT username), so the
+        // existence of another user's authorization is never revealed.
+        const row = await PatchAuthorization.findOne({ token: authToken, username });
+        if (!row) return res.status(404).json({ success: false, confirmed: false, error: 'Patch authorization not found.' });
+        if (row.used) return res.json({ success: true, confirmed: true, alreadyConfirmed: true });
+        if (row.expiresAt && new Date(row.expiresAt) <= new Date()) {
+            return res.status(410).json({ success: false, confirmed: false, error: 'Patch authorization expired.' });
+        }
+        // Unreachable in practice (the flip guard covers every live state)
+        // — fail closed rather than confirming silently.
+        return res.status(500).json({ success: false, confirmed: false, error: 'Could not confirm patch authorization. Please try again.' });
+    } catch (e) {
+        return serverError(res, e, 500, 'Something went wrong. Please try again.', { success: false, confirmed: false });
+    }
+}
+
 // Redeem Voucher Key
 async function redeemKey(req, res) {
     await connectToDatabase();
@@ -356,6 +410,7 @@ module.exports = {
     getCredits,
     deductCredit,
     authorizePatch,
+    confirmPatch,
     redeemKey,
     submitPaymentProof
 };
