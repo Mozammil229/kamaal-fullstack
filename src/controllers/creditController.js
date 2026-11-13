@@ -24,9 +24,16 @@ async function getCredits(req, res) {
         // expecting a 403 for banned users — it never got one.
         if (user.status === 'banned') return res.status(403).json({ success: false, error: 'Account banned.' });
 
+        // P-1b (D-12c, HOLD MODEL): credits currently reserved by live
+        // (unused + unexpired) patch authorizations, and what is left to
+        // authorize with. Additive fields — the balance itself is unchanged
+        // by a hold; only confirm / recipe-issue deducts.
+        const held = await countLiveHolds(username);
         return res.json({
             success: true,
             credits: user.credits,
+            creditsHeld: held,
+            creditsAvailable: Math.max(0, (Number(user.credits) || 0) - held),
             tier: user.tier,
             isPro: user.isPro,
             plan: user.proPlan,
@@ -94,50 +101,76 @@ async function deductCredit(req, res) {
     }
 }
 
-// Authorize + Atomic Deduct (single server-side operation)
-// This endpoint BOTH authorizes and deducts exactly 1 credit atomically.
+// P-1b (D-12c, HOLD MODEL) — what a "hold" is, and why this shape:
+// A hold IS a live PatchAuthorization row (used:false, expiresAt > now).
+// No creditsHeld counter is stored on the User: available = credits -
+// count(live rows), computed on demand. That makes expiry release
+// automatic — the row's 10-min TTL deletes it at expiry (and even before
+// the TTL fires, the expiresAt guard excludes it from the count), so a
+// hold can never be stranded by a crashed request or a missed sweep.
+// Race safety: only authorize mints rows. The count -> mint sequence is
+// serialized by optimistic concurrency on User.holdSeq: an atomic
+// findOneAndUpdate guarded on the observed seq bumps it; the loser
+// retries (bounded) and re-counts. Two concurrent authorizes for the
+// last credit cannot both succeed — the loser re-counts the winner's
+// row and gets 402. The commit step (confirm-patch, and requestRecipe
+// for the Android flow) deducts via the same atomic used:false->true
+// flip, so a hold converts to exactly one deduction.
+const HOLD_TTL_MS = 10 * 60 * 1000;
+const HOLD_MAX_ATTEMPTS = 5;
+
+async function countLiveHolds(username) {
+    const PatchAuthorization = require('../models/PatchAuthorization');
+    return PatchAuthorization.countDocuments({ username, used: false, expiresAt: { $gt: new Date() } });
+}
+
+// Authorize + HOLD (P-1b, D-12c) — reserves 1 credit, deducts NOTHING.
 // The client must never deduct on its own: only a 2xx {authorized:true}
-// response means a credit was consumed server-side. Offline / unverifiable
-// requests can therefore never yield a free patch.
+// response means a credit is held server-side. The deduct happens at
+// the commit step (confirm-patch, or requestRecipe for Android) — a
+// failed / abandoned / expired patch costs nothing: expiry deletes the
+// row (TTL) and the hold releases itself; release-patch frees it early.
+// 402 when the AVAILABLE balance (credits minus live holds) is < 1, so
+// one credit can never be held twice.
 async function authorizePatch(req, res) {
     await connectToDatabase();
     if (!isDbConnected()) {
         return res.status(503).json({ authorized: false, error: 'Database offline. Authorization requires authoritative database connection.' });
     }
     // Username comes from the verified JWT (route uses authenticateUser) —
-    // never from the body — so an attacker cannot spend a victim's credits.
+    // never from the body — so an attacker cannot hold a victim's credits.
     const target = req.user?.username;
     if (!target) return res.status(401).json({ authorized: false, error: 'Authentication required.' });
 
     try {
-        const user = await User.findOne({ username: target });
-        if (!user) return res.status(404).json({ authorized: false, error: 'User not found.' });
-        if (user.status === 'banned') return res.status(403).json({ authorized: false, error: 'Account banned.' });
+        const PatchAuthorization = require('../models/PatchAuthorization');
+        const crypto = require('crypto');
+        // Optimistic-concurrency loop: read balance + live holds, then
+        // claim the sequence. A concurrent authorize that minted first
+        // bumped holdSeq, so our guarded bump misses and we retry with a
+        // fresh count (which now includes the winner's hold).
+        for (let attempt = 0; attempt < HOLD_MAX_ATTEMPTS; attempt++) {
+            const user = await User.findOne({ username: target });
+            if (!user) return res.status(404).json({ authorized: false, error: 'User not found.' });
+            if (user.status === 'banned') return res.status(403).json({ authorized: false, error: 'Account banned.' });
 
-        // Atomic check-and-deduct: exactly 1 credit in a single ledger op.
-        // modifyCredits uses findOneAndUpdate with a credits >= 1 filter, so
-        // concurrent requests cannot overdraw; it throws 'Insufficient credits'
-        // when the balance is too low.
-        try {
-            const { user: updatedUser } = await modifyCredits({
-                username: target,
-                amount: -1,
-                type: 'usage_deduct',
-                description: 'Credit deducted for video_patch (authorize-patch)',
-                adminUser: 'System'
-            });
-            // v91 (BugHunter backend F7): stats as best-effort atomic $inc,
-            // never a whole-doc save after the money moved.
-            try {
-                await User.updateOne({ username: target }, { $inc: { 'stats.videosPatched': 1 } });
-            } catch (_) { /* stats are non-critical */ }
-            // v91 (BugHunter backend F6): mint the server-side authorization
-            // record that requestRecipe must consume. Without it, any
-            // authenticated user with 0 credits could mint recipes for free.
-            // If the record cannot be created, REFUND the credit — the user
-            // must never lose a credit for an authorization that never existed.
-            const crypto = require('crypto');
-            const PatchAuthorization = require('../models/PatchAuthorization');
+            const held = await countLiveHolds(target);
+            const available = (Number(user.credits) || 0) - held;
+            if (available < 1) {
+                return res.status(402).json({ authorized: false, error: 'No credits remaining. Please upgrade or redeem voucher.' });
+            }
+
+            const locked = await User.findOneAndUpdate(
+                { username: target, holdSeq: user.holdSeq || 0 },
+                { $inc: { holdSeq: 1 } },
+                { new: true }
+            );
+            if (!locked) continue; // lost the race — re-read and re-count
+
+            // We own the sequence: mint the 10-minute authorization row.
+            // No credit moves here — the hold IS this row. A mint failure
+            // costs the user nothing (the seq bump only serializes
+            // authorize attempts); report 500 and let the client retry.
             const authToken = crypto.randomBytes(24).toString('base64url');
             try {
                 await PatchAuthorization.create({
@@ -145,42 +178,45 @@ async function authorizePatch(req, res) {
                     username: target,
                     method: '',
                     used: false,
-                    expiresAt: new Date(Date.now() + 10 * 60 * 1000)
+                    expiresAt: new Date(Date.now() + HOLD_TTL_MS)
                 });
             } catch (authErr) {
-                try {
-                    await modifyCredits({
-                        username: target,
-                        amount: 1,
-                        type: 'admin_grant',
-                        description: 'Refund: patch authorization record could not be created',
-                        adminUser: 'System'
-                    });
-                } catch (_) { /* refund is best-effort; the failure is logged below */ }
-                console.error('[authorize-patch] auth record failed, credit refunded:', authErr.message);
-                return res.status(500).json({ success: false, authorized: false, error: 'Authorization could not be recorded. Credit refunded — please try again.' });
+                console.error('[authorize-patch] auth record failed, no credit moved:', authErr.message);
+                return res.status(500).json({ success: false, authorized: false, error: 'Authorization could not be recorded. No credit was held — please try again.' });
             }
-            return res.json({ success: true, authorized: true, authToken, credits: updatedUser.credits, creditsRemaining: updatedUser.credits, isPro: updatedUser.isPro });
-        } catch (e) {
-            if (e.message && e.message.includes('Insufficient credits')) {
-                return res.status(402).json({ authorized: false, error: 'No credits remaining. Please upgrade or redeem voucher.' });
-            }
-            throw e;
+            return res.json({
+                success: true,
+                authorized: true,
+                authToken,
+                credits: user.credits,
+                creditsRemaining: user.credits,
+                creditsHeld: held + 1,
+                creditsAvailable: available - 1,
+                isPro: user.isPro
+            });
         }
+        // Every attempt lost the sequence race (sustained contention) —
+        // fail closed without minting anything; the client retries.
+        return res.status(503).json({ success: false, authorized: false, error: 'Authorization is busy. Please try again.' });
     } catch (e) {
         return serverError(res, e, 500, 'Something went wrong. Please try again.', { authorized: false });
     }
 }
 
-// P-1 (D-12b, server confirm): confirm a patch authorization minted by
-// authorize-patch. Charge-after-authorize: the credit was ALREADY deducted
-// at authorize time — this endpoint NEVER deducts and NEVER refunds
-// (D-12c refund policy is still open, decided later). Idempotent by
-// construction: a repeat confirm returns 200 alreadyConfirmed instead of
-// an error, so a client retry after a dropped response can never look
-// like a failure. NOTE on 404 vs 410: rows whose TTL already fired are
-// DELETED by Mongo, so a long-expired token presents as 404, not 410;
-// 410 only fires while the row still exists with a past expiresAt.
+// P-1b (D-12c, HOLD MODEL — server confirm is now the COMMIT step):
+// confirm a patch authorization minted by authorize-patch. The atomic
+// used:false->true flip is the single-winner lock (shared with
+// requestRecipe, the Android commit point): the winner deducts exactly
+// 1 credit via modifyCredits; a repeat confirm returns 200
+// alreadyConfirmed and deducts nothing. If the deduct cannot happen
+// (e.g. the held credit was spent elsewhere via /api/deduct while the
+// hold was live), the flip is ROLLED BACK and the call fails 402 — the
+// token stays live and usable, and no credit is taken for an
+// unconfirmed patch. Idempotent by construction: a client retry after a
+// dropped response can never double-deduct. NOTE on 404 vs 410: rows
+// whose TTL already fired are DELETED by Mongo, so a long-expired token
+// presents as 404, not 410; 410 only fires while the row still exists
+// with a past expiresAt.
 async function confirmPatch(req, res) {
     await connectToDatabase();
     if (!isDbConnected()) {
@@ -207,7 +243,43 @@ async function confirmPatch(req, res) {
             { new: true }
         );
         if (flipped) {
-            return res.json({ success: true, confirmed: true });
+            // Commit: deduct 1 against the live hold. modifyCredits is
+            // itself atomic (credits >= 1 filter) and writes the ledger
+            // row, so the deduction is exactly-once per flipped token.
+            try {
+                const { user: updatedUser } = await modifyCredits({
+                    username,
+                    amount: -1,
+                    type: 'usage_deduct',
+                    description: 'Credit deducted for video_patch (confirm-patch commit)',
+                    adminUser: 'System'
+                });
+                // v91 (BugHunter backend F7): stats as best-effort atomic
+                // $inc, never a whole-doc save after the money moved. The
+                // patch count lands at COMMIT time now, not authorize.
+                try {
+                    await User.updateOne({ username }, { $inc: { 'stats.videosPatched': 1 } });
+                } catch (_) { /* stats are non-critical */ }
+                return res.json({ success: true, confirmed: true, credits: updatedUser.credits, creditsRemaining: updatedUser.credits });
+            } catch (deductErr) {
+                // Fail closed WITHOUT flipping used: roll the flip back so
+                // the token stays live and the client can retry after a
+                // top-up. The patch itself is not undone — only the
+                // charge is withheld until a confirm can actually pay.
+                try {
+                    await PatchAuthorization.findOneAndUpdate(
+                        { token: authToken, username, used: true },
+                        { $set: { used: false } },
+                        { new: true }
+                    );
+                } catch (rollbackErr) {
+                    console.error('[confirm-patch] deduct failed AND flip rollback failed:', rollbackErr.message);
+                }
+                if (deductErr.message && deductErr.message.includes('Insufficient credits')) {
+                    return res.status(402).json({ success: false, confirmed: false, error: 'No credits remaining. Please upgrade or redeem voucher.' });
+                }
+                throw deductErr;
+            }
         }
         // Not flipped: distinguish the three states. A wrong-user token
         // reads as 404 (row lookup is scoped to the JWT username), so the
@@ -223,6 +295,57 @@ async function confirmPatch(req, res) {
         return res.status(500).json({ success: false, confirmed: false, error: 'Could not confirm patch authorization. Please try again.' });
     } catch (e) {
         return serverError(res, e, 500, 'Something went wrong. Please try again.', { success: false, confirmed: false });
+    }
+}
+
+// P-1b (D-12c, HOLD MODEL) — POST /api/release-patch: release the hold
+// for a live unused token (patch cancelled / abandoned by the client).
+// The row is deleted atomically (guarded on used:false + unexpired), so
+// the hold frees immediately and the credit is spendable again — no
+// money moves, because nothing was deducted yet. Repeat release of the
+// same token is 404 (the row is gone); a released token can never be
+// confirmed afterwards (confirm reads 404 too). States mirror confirm:
+// unknown/wrong-user -> 404, already-confirmed (used) -> 409 (the credit
+// was deducted — release cannot refund it), expired row still present
+// -> 410 (in production the TTL usually deletes it first -> 404).
+async function releasePatch(req, res) {
+    await connectToDatabase();
+    if (!isDbConnected()) {
+        return res.status(503).json({ success: false, released: false, error: 'Database offline. Release requires authoritative database connection.' });
+    }
+    // Username comes from the verified JWT — never from the body.
+    const username = req.user?.username;
+    if (!username) return res.status(401).json({ success: false, released: false, error: 'Authentication required.' });
+
+    const authToken = typeof req.body?.authToken === 'string' ? req.body.authToken.trim() : '';
+    if (!authToken) return res.status(400).json({ success: false, released: false, error: 'authToken is required.' });
+
+    try {
+        const PatchAuthorization = require('../models/PatchAuthorization');
+        // Atomic delete: only a live (unused + unexpired) row is released.
+        // A concurrent confirm that flipped first wins instead — the
+        // delete then misses and the state read below reports 409.
+        const released = await PatchAuthorization.findOneAndDelete(
+            { token: authToken, username, used: false, expiresAt: { $gt: new Date() } }
+        );
+        if (released) {
+            const user = await User.findOne({ username });
+            return res.json({
+                success: true,
+                released: true,
+                credits: user ? user.credits : undefined,
+                creditsHeld: await countLiveHolds(username)
+            });
+        }
+        const row = await PatchAuthorization.findOne({ token: authToken, username });
+        if (!row) return res.status(404).json({ success: false, released: false, error: 'Patch authorization not found.' });
+        if (row.used) return res.status(409).json({ success: false, released: false, error: 'Patch already confirmed — the credit was deducted and cannot be released.' });
+        if (row.expiresAt && new Date(row.expiresAt) <= new Date()) {
+            return res.status(410).json({ success: false, released: false, error: 'Patch authorization expired — the hold already released.' });
+        }
+        return res.status(500).json({ success: false, released: false, error: 'Could not release patch authorization. Please try again.' });
+    } catch (e) {
+        return serverError(res, e, 500, 'Something went wrong. Please try again.', { success: false, released: false });
     }
 }
 
@@ -411,6 +534,7 @@ module.exports = {
     deductCredit,
     authorizePatch,
     confirmPatch,
+    releasePatch,
     redeemKey,
     submitPaymentProof
 };

@@ -46,6 +46,48 @@ function matches(row, query) {
     return true;
 }
 
+// P-1b: operator-aware matcher for findOneAndUpdate filters — the ledger
+// (modifyCredits) filters on credits: {$gte: n} and authorize-patch on
+// holdSeq equality. Equality falls through to the plain matcher above.
+function matchesUpdateFilter(row, query) {
+    if (!query || typeof query !== 'object') return true;
+    for (const [key, val] of Object.entries(query)) {
+        if (val && typeof val === 'object' && !Array.isArray(val)) {
+            if ('$gte' in val && !(row[key] >= val.$gte)) return false;
+            if ('$gt' in val && !(row[key] > val.$gt)) return false;
+            if ('$lte' in val && !(row[key] <= val.$lte)) return false;
+            if ('$lt' in val && !(row[key] < val.$lt)) return false;
+            if ('$ne' in val && String(row[key]) === String(val.$ne)) return false;
+            continue;
+        }
+        if (row[key] === undefined) return false;
+        if (String(row[key]) !== String(val)) return false;
+    }
+    return true;
+}
+
+function setPath(row, path, value) {
+    const parts = String(path).split('.');
+    let cur = row;
+    for (let i = 0; i < parts.length - 1; i++) {
+        if (cur[parts[i]] === undefined || typeof cur[parts[i]] !== 'object') cur[parts[i]] = {};
+        cur = cur[parts[i]];
+    }
+    cur[parts[parts.length - 1]] = value;
+}
+
+function applyUpdate(row, update) {
+    if (!update) return;
+    for (const [path, delta] of Object.entries(update.$inc || {})) {
+        const parts = String(path).split('.');
+        let cur = row;
+        for (let i = 0; i < parts.length - 1; i++) cur = cur[parts[i]];
+        const leaf = parts[parts.length - 1];
+        cur[leaf] = (Number(cur[leaf]) || 0) + Number(delta);
+    }
+    for (const [path, value] of Object.entries(update.$set || {})) setPath(row, path, value);
+}
+
 function makeUser(username, email, phone) {
     return {
         _id: new mongoose.Types.ObjectId().toString(),
@@ -100,6 +142,15 @@ const stubUser = {
         if (!row) return { modifiedCount: 0 };
         Object.assign(row, (update && update.$set) || {});
         return { modifiedCount: 1 };
+    },
+    // P-1b: atomic findOneAndUpdate for the ledger (modifyCredits:
+    // credits {$gte: n} + $inc) and authorize-patch (holdSeq CAS + $inc).
+    // Single-threaded in-memory apply = atomic for the test harness.
+    async findOneAndUpdate(filter, update, options) {
+        const row = users.find((u) => matchesUpdateFilter(u, filter));
+        if (!row) return null;
+        applyUpdate(row, update);
+        return row;
     }
 };
 
@@ -158,6 +209,24 @@ const stubAppConfig = {
     }
 };
 
+// P-1b: in-memory Transaction ledger. modifyCredits writes its audit row
+// best-effort; without this stub the real Mongoose model would buffer
+// against the unconnected test DB (~10s timeout per money call). Rows are
+// inspectable via the exported txRows (commit-path assertions).
+const txRows = [];
+
+const stubTransaction = {
+    _rows: txRows,
+    async create(data) {
+        const row = { ...data, _id: new mongoose.Types.ObjectId().toString(), createdAt: new Date() };
+        txRows.push(row);
+        return row;
+    },
+    async findOne(query) {
+        return txRows.find((r) => matches(r, query)) || null;
+    }
+};
+
 function installStub(relativePath, exportsObj) {
     const resolved = require.resolve(relativePath);
     require.cache[resolved] = { id: resolved, filename: resolved, loaded: true, exports: exportsObj };
@@ -171,5 +240,6 @@ installStub('../src/models/User', stubUser);
 installStub('../src/models/RefreshToken', stubRefreshToken);
 installStub('../src/models/RevokedToken', stubRevokedToken);
 installStub('../src/models/AppConfig', stubAppConfig);
+installStub('../src/models/Transaction', stubTransaction);
 
-module.exports = { users, refreshRows, revokedHashes, stubUser, stubRefreshToken };
+module.exports = { users, refreshRows, revokedHashes, txRows, stubUser, stubRefreshToken, stubTransaction };

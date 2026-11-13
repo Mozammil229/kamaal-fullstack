@@ -13,6 +13,14 @@ const UserSchema = new mongoose.Schema({
     token: { type: String, default: '' },
     deviceId: { type: String, default: '', index: true },
     credits: { type: Number, default: 2 },
+    // P-1b (D-12c, HOLD MODEL): optimistic-concurrency sequence for
+    // authorize-patch. Only authorize mints PatchAuthorization rows, and
+    // the count-live-holds -> mint sequence is serialized by an atomic
+    // findOneAndUpdate guarded on the observed holdSeq (loser retries and
+    // re-counts), so two concurrent authorizes for the last credit cannot
+    // both succeed. Bumped ONLY by authorize-patch, never by confirm /
+    // release / recipe-consume (those only shrink the live-hold count).
+    holdSeq: { type: Number, default: 0 },
     // PHASE E — lifetime credits earned (drives TAG/LEVEL badges via
     // socialTagService.computeSocialTag); `tag` is a persisted convenience
     // recomputed on every credit grant. fcmToken is stored only (E5).

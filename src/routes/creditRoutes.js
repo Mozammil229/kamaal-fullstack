@@ -16,20 +16,28 @@ const authorizeRateLimit = rateLimit({ windowMs: 60 * 1000, max: 10, message: 'T
 // P-1 (D-12b): confirm-patch mirrors authorize-patch at 10/min/user —
 // confirming is cheap but the flip is a write, so it gets the same bucket.
 const confirmRateLimit = rateLimit({ windowMs: 60 * 1000, max: 10, message: 'Too many patch confirmations. Try again in a minute.' });
+// P-1b (D-12c): release-patch mirrors confirm-patch at 10/min/user —
+// releasing deletes the hold row, so it gets the same bucket.
+const releaseRateLimit = rateLimit({ windowMs: 60 * 1000, max: 10, message: 'Too many patch releases. Try again in a minute.' });
 
 // SECURITY FIX: every credit route requires a valid user JWT. Usernames are
 // taken from the verified token (req.user.username), never from body/query —
 // otherwise anyone could read, spend, or drain another user's credits.
-// authorize-patch deducts 1 credit atomically server-side: it must be
-// JWT-authenticated so nobody can spend (or drain) another user's credits
+// P-1b (D-12c, HOLD MODEL): authorize-patch HOLDS 1 credit server-side
+// (a live PatchAuthorization row); the deduct happens at the commit step
+// (confirm-patch, or requestRecipe for Android). It must be
+// JWT-authenticated so nobody can hold (or drain) another user's credits
 // by username alone.
 router.get('/credits', authenticateUser, creditController.getCredits);
 router.post(['/deduct', '/credits/deduct'], authenticateUser, deductRateLimit, creditController.deductCredit);
 router.post('/authorize-patch', authenticateUser, authorizeRateLimit, creditController.authorizePatch);
 // P-1 (D-12b, server confirm): flips a minted authorization used:false ->
-// true. No credit movement here — the deduct already happened at
-// authorize-patch. Idempotent: a repeat confirm is 200 alreadyConfirmed.
+// true AND deducts 1 credit (P-1b commit step). Idempotent: a repeat
+// confirm is 200 alreadyConfirmed, never a second deduction.
+// P-1b (D-12c, hold release): POST /api/release-patch deletes a live
+// unused authorization, freeing its hold. No credit moves either way.
 router.post('/confirm-patch', authenticateUser, confirmRateLimit, creditController.confirmPatch);
+router.post('/release-patch', authenticateUser, releaseRateLimit, creditController.releasePatch);
 router.post('/redeem', authenticateUser, redeemRateLimit, creditController.redeemKey);
 router.post('/payment/submit-proof', authenticateUser, proofRateLimit, creditController.submitPaymentProof);
 

@@ -16,9 +16,16 @@ const RECIPE_TTL_MS = 5 * 60 * 1000;
  *
  * Authenticated (JWT) + Kamal ID device-binding check + ~10/hr per-user rate
  * limit (enforced in patchRoutes). The existing authorize-patch credit
- * deduction is REUSED, not duplicated: the client calls /api/authorize-patch
- * first (1 credit deducted atomically there), then requests the recipe here.
- * This endpoint deducts nothing.
+ * HOLD is COMMITTED here, not duplicated: the client calls
+ * /api/authorize-patch first (1 credit held server-side), then requests
+ * the recipe here. This endpoint deducts exactly 1 credit — but ONLY when
+ * it atomically consumes a live authorization (P-1b, D-12c): the
+ * used:false->true flip is the single-winner lock shared with
+ * confirm-patch, so a hold converts to exactly one deduction no matter
+ * which commit point runs first. A refused recipe (bad device key, Pro
+ * gate, device mismatch, unknown user) consumes NOTHING — the flip runs
+ * after every validation passes, and a failed deduct rolls the flip
+ * back, leaving the token usable for a retry after top-up.
  *
  * Crypto envelope (all fresh per request — this is the replay protection):
  *   1. recipeId  = uuid, nonce = 12 random bytes, aesKey = 32 random bytes
@@ -50,20 +57,17 @@ async function requestRecipe(req, res) {
     }
     // v91 (BugHunter backend F6): a recipe is issued ONLY against a
     // server-side authorization record created by /api/authorize-patch (1
-    // credit deducted there). The record is consumed atomically here — a
+    // credit held there). The record is consumed atomically here — a
     // client that skips authorize can no longer patch for free.
+    // P-1b (D-12c): the consumption happens AFTER every validation below
+    // (device key, user, Pro gate, device binding), so a refused recipe
+    // never burns the hold — and the flip is immediately followed by the
+    // 1-credit commit deduct (rolled back on failure, see below).
     if (!authToken || typeof authToken !== 'string') {
         return res.status(400).json({ success: false, error: 'Patch authorization required. Call /api/authorize-patch first.' });
     }
     const PatchAuthorization = require('../models/PatchAuthorization');
-    const authRecord = await PatchAuthorization.findOneAndUpdate(
-        { token: authToken.trim(), username, used: false, expiresAt: { $gt: new Date() } },
-        { $set: { used: true, method: recipe.method } },
-        { new: true }
-    );
-    if (!authRecord) {
-        return res.status(400).json({ success: false, error: 'Patch authorization missing, already used, or expired. Call /api/authorize-patch first.' });
-    }
+    const { modifyCredits } = require('../services/ledgerService');
     // v91 (BugHunter frontback F15): Moshi serializes an explicit JSON null,
     // and `subMode !== undefined` let null through as "provided" (400 for
     // Method 4). Null is now treated as absent, like undefined.
@@ -110,6 +114,50 @@ async function requestRecipe(req, res) {
             // v91 (BugHunter DB P1-13): targeted $set, not whole-doc save().
             await User.updateOne({ _id: user._id }, { $set: { deviceId: cleanDevice } });
         }
+
+        // P-1b (D-12c) — COMMIT the hold: atomically consume the live
+        // authorization, then deduct 1. The flip is the single-winner
+        // lock shared with confirm-patch, so this token can commit
+        // exactly once across both endpoints. If the deduct cannot
+        // happen, roll the flip back (fail closed: no recipe, no charge,
+        // token stays usable) instead of issuing a recipe for free.
+        const authRecord = await PatchAuthorization.findOneAndUpdate(
+            { token: authToken.trim(), username, used: false, expiresAt: { $gt: new Date() } },
+            { $set: { used: true, method: recipe.method } },
+            { new: true }
+        );
+        if (!authRecord) {
+            return res.status(400).json({ success: false, error: 'Patch authorization missing, already used, or expired. Call /api/authorize-patch first.' });
+        }
+        try {
+            await modifyCredits({
+                username,
+                amount: -1,
+                type: 'usage_deduct',
+                description: 'Credit deducted for video_patch (request-recipe commit)',
+                adminUser: 'System'
+            });
+        } catch (deductErr) {
+            try {
+                await PatchAuthorization.findOneAndUpdate(
+                    { token: authToken.trim(), username, used: true },
+                    { $set: { used: false, method: '' } },
+                    { new: true }
+                );
+            } catch (rollbackErr) {
+                console.error('[request-recipe] deduct failed AND flip rollback failed:', rollbackErr.message);
+            }
+            if (deductErr.message && deductErr.message.includes('Insufficient credits')) {
+                return res.status(402).json({ success: false, error: 'No credits remaining. Please upgrade or redeem voucher.' });
+            }
+            throw deductErr;
+        }
+        // v91 (BugHunter backend F7): stats as best-effort atomic $inc,
+        // never a whole-doc save after the money moved. The patch count
+        // lands at COMMIT time now, not authorize.
+        try {
+            await User.updateOne({ username }, { $inc: { 'stats.videosPatched': 1 } });
+        } catch (_) { /* stats are non-critical */ }
 
         const recipeId = crypto.randomUUID();
         const nonce = crypto.randomBytes(12);

@@ -6,6 +6,13 @@
 // require.cache pattern as tests/4e-mount-smoke.test.js. Rows are seeded
 // directly into the stub store (authorize-patch itself is NOT called:
 // its ledger path needs a real modifyCredits/User findOneAndUpdate).
+//
+// P-1b (D-12c, HOLD MODEL): confirm is now the COMMIT step — it deducts
+// exactly 1 via the ledger, so happy-path / idempotent tests use real
+// stubbed 4D users (pwauser/pwauser2/pwauser3, credits: 5) and assert the
+// -1. The shared stubs (tests/4d-pwa-stubs.js) now carry a
+// findOneAndUpdate on the stub User (ledger CAS + holdSeq) and an
+// in-memory Transaction stub, so modifyCredits runs without a real DB.
 // The stub has no TTL sweeper, so an expired row stays readable —
 // exactly what the 410 case needs (in production a TTL-deleted row
 // presents as 404 instead).
@@ -53,6 +60,10 @@ const stubPatchAuthorization = {
         if (!row) return null;
         Object.assign(row, (update && update.$set) || {});
         return row;
+    },
+    // P-1b: getCredits / authorize-patch count live holds.
+    async countDocuments(query) {
+        return authRows.filter((r) => matchesAuth(r, query)).length;
     }
 };
 
@@ -120,14 +131,24 @@ test('P1-MOUNT: POST /api/confirm-patch without auth is 401, never 404 (route is
     assert.equal(r.status, 401, `unauthed confirm must be 401, got ${r.status}`);
 });
 
-test('P1-HAPPY: valid token flips used false->true, 200 {success:true, confirmed:true}', async () => {
-    const row = seedAuth({ token: 'p1-happy-token', username: 'p1-happy' });
+test('P1-HAPPY: valid token flips used false->true, 200 {success:true, confirmed:true}, deducts 1 (P-1b: confirm IS the commit)', async () => {
+    // pwauser2 is a stubbed 4D user with credits: 5 — confirm deducts
+    // via the ledger now, so the test user must exist in the stub store.
+    async function balance() {
+        const r = await req('GET', '/api/credits', { headers: authHeaders('pwauser2') });
+        assert.equal(r.status, 200, `GET /api/credits must be 200, got ${r.status}: ${r.body}`);
+        return JSON.parse(r.body).credits;
+    }
+    const before = await balance();
+    const row = seedAuth({ token: 'p1-happy-token', username: 'pwauser2' });
     assert.equal(row.used, false);
-    const r = await confirm('p1-happy', { authToken: 'p1-happy-token' });
+    const r = await confirm('pwauser2', { authToken: 'p1-happy-token' });
     assert.equal(r.status, 200, `happy-path confirm must be 200, got ${r.status}: ${r.body}`);
     assert.equal(r.json.success, true);
     assert.equal(r.json.confirmed, true);
     assert.equal(row.used, true, 'row must be flipped used:true in the store');
+    const after = await balance();
+    assert.equal(after, before - 1, `confirm must deduct exactly 1: before=${before} after=${after}`);
 });
 
 test('P1-400: missing authToken -> 400', async () => {
@@ -151,18 +172,27 @@ test('P1-410: row with past expiresAt (TTL not yet fired) -> 410', async () => {
     assert.equal(r.json.confirmed, false);
 });
 
-test('P1-IDEMPOTENT: repeat confirm -> 200 {confirmed:true, alreadyConfirmed:true}, row stays used', async () => {
-    const row = seedAuth({ token: 'p1-repeat-token', username: 'p1-repeat' });
-    const first = await confirm('p1-repeat', { authToken: 'p1-repeat-token' });
+test('P1-IDEMPOTENT: repeat confirm -> 200 {confirmed:true, alreadyConfirmed:true}, row stays used, deducts only once', async () => {
+    // pwauser3 is a stubbed 4D user with credits: 5.
+    async function balance() {
+        const r = await req('GET', '/api/credits', { headers: authHeaders('pwauser3') });
+        assert.equal(r.status, 200, `GET /api/credits must be 200, got ${r.status}: ${r.body}`);
+        return JSON.parse(r.body).credits;
+    }
+    const before = await balance();
+    const row = seedAuth({ token: 'p1-repeat-token', username: 'pwauser3' });
+    const first = await confirm('pwauser3', { authToken: 'p1-repeat-token' });
     assert.equal(first.status, 200);
     assert.equal(first.json.confirmed, true);
     assert.equal(first.json.alreadyConfirmed, undefined, 'first confirm must not claim alreadyConfirmed');
-    const second = await confirm('p1-repeat', { authToken: 'p1-repeat-token' });
+    assert.equal(await balance(), before - 1, 'first confirm must deduct exactly 1');
+    const second = await confirm('pwauser3', { authToken: 'p1-repeat-token' });
     assert.equal(second.status, 200, `repeat confirm must be 200, never an error, got ${second.status}`);
     assert.equal(second.json.success, true);
     assert.equal(second.json.confirmed, true);
     assert.equal(second.json.alreadyConfirmed, true);
     assert.equal(row.used, true);
+    assert.equal(await balance(), before - 1, 'repeat confirm must NOT deduct a second credit');
 });
 
 test('P1-WRONG-USER: another user confirming the token -> 404, row untouched', async () => {
@@ -173,7 +203,7 @@ test('P1-WRONG-USER: another user confirming the token -> 404, row untouched', a
     assert.equal(row.used, false, 'row must stay unused after a wrong-user attempt');
 });
 
-test('P1-CREDITS: balance identical before/after confirm (no deduct, no refund)', async () => {
+test('P1-CREDITS: confirm deducts exactly 1 (P-1b: confirm IS the commit — the old no-move expectation is retired)', async () => {
     // pwauser is a stubbed 4D user with credits: 5.
     async function balance() {
         const r = await req('GET', '/api/credits', { headers: authHeaders('pwauser') });
@@ -185,7 +215,7 @@ test('P1-CREDITS: balance identical before/after confirm (no deduct, no refund)'
     const r = await confirm('pwauser', { authToken: 'p1-credits-token' });
     assert.equal(r.status, 200);
     const after = await balance();
-    assert.equal(after, before, `confirm must not move credits: before=${before} after=${after}`);
+    assert.equal(after, before - 1, `confirm must deduct exactly 1: before=${before} after=${after}`);
 });
 
 test('P1-RL: POST /api/confirm-patch 10/min/user — 11th request is 429 with Retry-After', async () => {
